@@ -34,6 +34,16 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
 
         root_dir_name = self.directory.split(os.sep)[-2]
 
+        # First we walk through the folders and import all images.
+        # This has to be done in advance before importing meshes because not all meshes
+        # have the necessary textures next to them.
+        # For example, Link's hair mesh is in Armor_Default/Armor_Default.fbx,
+        # but the textures are in Link/Link_Hair_Alb.png.
+
+        for root, subfolders, files in os.walk(self.directory):
+            for dirname in subfolders:
+                load_png_images_from_directory(os.path.join(root, dirname))
+
         for root, dirname, files in os.walk(self.directory):
             dae_files = [f for f in files if f.lower().endswith(".dae")]
             parent_coll = None
@@ -81,8 +91,6 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
 
         collection = ensure_collection(context, asset_name, parent=parent_coll)
 
-        load_png_images_from_directory(filepath)
-
         for obj in objs:
             collection.objects.link(obj)
             obj.select_set(True)
@@ -99,6 +107,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 if "Mt_" in obj.name:
                     split = obj.name.split("_Mt_")
                     obj.name = asset_name + "_" + split[0]
+                    if obj.name.endswith("_"):
+                        obj.name = obj.name[:-1]
                 else:
                     # Shame this print gets lost in collada import spam, sigh.
                     print("Couldn't rename object: ", obj.name)
@@ -207,13 +217,12 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         enable_print(True)
         return context.selected_objects[:]
 
-def load_png_images_from_directory(file_path):
+def load_png_images_from_directory(directory):
     """
     Loads all PNG images from the directory containing the given file path.
     
     :param file_path: The full path to a file in the target directory.
     """
-    directory = os.path.dirname(file_path)  # Get the directory of the given file
 
     if not os.path.exists(directory):
         print("Directory does not exist.")
@@ -223,6 +232,7 @@ def load_png_images_from_directory(file_path):
         if file.lower().endswith(".png") and file not in bpy.data.images:
             image_path = os.path.join(directory, file)
             img = bpy.data.images.load(image_path, check_existing=True)
+            print("Loaded image: ", img.filepath)
 
 def setup_material(obj, material):
     albedo = None

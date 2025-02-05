@@ -55,13 +55,14 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         # Set viewport shading to the BotW MatCap.
         for area in context.screen.areas:
             if area.type == 'VIEW_3D':
+                area.spaces.active.shading.type = 'SOLID'
                 area.spaces.active.shading.light = 'MATCAP'
                 area.spaces.active.shading.studio_light = 'botw.exr'
                 area.spaces.active.shading.color_type = 'TEXTURE'
 
     def import_and_setup_single_dae(self, context,  filepath, filename, asset_name):
         objs = self.import_dae(context, filepath, discard_types=('EMPTY'))
-        objs = self.replace_dae_with_fbx_armature(context, dae_objs=objs, dae_path=filepath, asset_name=asset_name)
+        objs = self.import_and_merge_fbx_data(context, dae_objs=objs, dae_path=filepath, asset_name=asset_name)
 
         collection = ensure_collection(context, asset_name)
 
@@ -77,21 +78,38 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 if obj.animation_data and obj.animation_data.action:
                     obj.animation_data.action = None
             elif obj.type == 'MESH':
+                obj['import_name'] = obj.name
+                split = obj.name.split("Mt_")
+                obj.name = asset_name + "_" + split[1]
                 self.cleanup_mesh(obj, asset_name)
 
             obj.data.name = obj.name
 
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+        bpy.ops.outliner.orphans_purge()
 
-    def replace_dae_with_fbx_armature(self, context, *, dae_objs, dae_path, asset_name):
+    def import_and_merge_fbx_data(self, context, *, dae_objs, dae_path, asset_name):
         """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
         fbx_path = dae_path.replace(".dae", ".fbx")
-        fbx_armatures = self.import_fbx(context, fbx_path, discard_types=('MESH', 'EMPTY'))
+        fbx_objects = self.import_fbx(context, fbx_path, discard_types=('EMPTY'))
+        fbx_armatures = [o for o in fbx_objects if o.type == 'ARMATURE']
 
-        if not fbx_armatures:
+        if not fbx_objects:
             return dae_objs
 
         ret_objs = dae_objs[:]
+
+        for dae_obj in dae_objs:
+            if dae_obj.type != 'MESH':
+                continue
+            fbx_obj = bpy.data.objects.get(dae_obj.name.replace("_dae", "_fbx"))
+            if not fbx_obj:
+                continue
+            for dae_mat, fbx_mat in zip(dae_obj.data.materials, fbx_obj.data.materials):
+                dae_mat.user_remap(fbx_mat)
+                fbx_mat.name = fbx_mat.name.replace("_fbx", "")
+            bpy.data.objects.remove(fbx_obj)
+            dae_obj.name = dae_obj.name.replace("_dae", "")
 
         dae_armatures = [ob for ob in dae_objs if ob.type=='ARMATURE']
         assert len(fbx_armatures) == len(dae_armatures), f"The .fbx and the .dae have different number of armatures for {dae_path}. This shouldn't happen."
@@ -121,56 +139,60 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
 
     def cleanup_mesh(self, obj, asset_name):
         for uv_layer, name in zip(obj.data.uv_layers, ("Albedo", "SPM")):
+            # TODO: Might need a check here to see if all coordinates are at (0,0) and remove if so.
             uv_layer.name = name
-        assert len(obj.data.uv_layers) < 3, f"Found an object with >2 UV layers: {obj.name}"
-        obj['import_name'] = obj.name
-        split = obj.name.split("Mt_")
-        obj.name = asset_name + "_" + split[1]
         for m in obj.data.materials:
-            orig_mat_name = m.name
-            new_mat_name = asset_name + orig_mat_name.replace("Mt_", "_")
-            if new_mat_name in bpy.data.materials:
-                m.user_remap(bpy.data.materials.get(new_mat_name))
-            else:
-                m.name = new_mat_name
-                setup_material(m)
-            obj['orig_mat_name'] = orig_mat_name
+            if 'Mt' in m.name:
+                orig_mat_name = m.name
+                obj['orig_mat_name'] = orig_mat_name
+                new_mat_name = asset_name + orig_mat_name.replace("Mt_", "_")
+                if new_mat_name in bpy.data.materials:
+                    m.user_remap(bpy.data.materials.get(new_mat_name))
+                else:
+                    m.name = new_mat_name
+            setup_material(m)
 
     def import_fbx(self, context, filepath, discard_types=('MESH', 'EMPTY')):
-        if not os.path.exists(filepath):
-            return False
-        if context.object:
-            bpy.ops.object.mode_set(mode='OBJECT')
-        bpy.ops.object.select_all(action='DESELECT')
-        enable_print(False)
-        bpy.ops.import_scene.fbx(filepath=filepath)
-        for ob in context.selected_objects[:]:
-            if ob.type in discard_types:
-                bpy.data.objects.remove(ob)
-        bpy.ops.outliner.orphans_purge()
-        enable_print(True)
-        return context.selected_objects[:]
+        return self.import_dae_or_fbx(context, is_dae=False, filepath=filepath, discard_types=discard_types)
 
     def import_dae(self, context, filepath, discard_types=('EMPTY')):
+        return self.import_dae_or_fbx(context, is_dae=True, filepath=filepath, discard_types=discard_types)
+
+    def import_dae_or_fbx(self, context, *, is_dae: bool, filepath: str, discard_types = ('EMPTY')):
+        suffix = "_dae" if is_dae else "_fbx"
+
+        # Both of these functions take a "filepath" property, 
+        # and both load the contents to the active collection and select all objects.
+        import_func = bpy.ops.wm.collada_import if is_dae else bpy.ops.import_scene.fbx
+
         if not os.path.exists(filepath):
             return False
         if context.object:
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.select_all(action='DESELECT')
         enable_print(False)
-        # Can't seem to suppress these prints, wow.
-        bpy.ops.wm.collada_import(filepath=filepath)
+        # Can't seem to suppress prints on collada, hmm.
+        import_func(filepath=filepath)
         for ob in context.selected_objects[:]:
             if ob.type in discard_types:
                 bpy.data.objects.remove(ob)
+                continue
+            ob.name += suffix
+            if ob.type == 'MESH':
+                for m in ob.data.materials:
+                    m.name += suffix
         enable_print(True)
         return context.selected_objects[:]
-
 
 def setup_material(material):
     # Load and position all detected relevant textures based on any existing texture nodes, while setting all non-Albedos to Non-Color colorspace.
     # Ensure the appropriate shader nodetree from resource.blend is present, and instance it. To determine what shader to use, we can only guess by names.
     # Connect noodles.
+
+    # HAYYAAAA. A single .dae/.fbx file can contain multiple meshes. It still holds true that one mesh is for one material. But get this; The fbx has more material information than the .dae. It has some texture nodes, which have file paths that at least end in a valid filename, while the .dae sometimes has this, but often not.
+    # But remember, the .dae file has the UV maps.
+    # So we need to decide if we want to transfer the materials from the fbx to the dae, or transfer the UVs from the dae to the fbx.
+    # By the way, neither contains as much data as Switch Tools is able to access, so that's sad.
     pass
 
 def enable_print(bool):

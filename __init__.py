@@ -10,6 +10,7 @@ module_names = (
     "collections",
     "asset_names",
     "widgets",
+    "matcap",
 )
 
 

@@ -9,6 +9,12 @@ from .collections import ensure_collection
 from .widgets import ensure_widget
 from math import pi
 
+PRINT_LATER = []
+
+def print_later(*msg):
+    PRINT_LATER.append("".join(msg))
+
+
 class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     """Import all FBX files from a selected folder recursively"""
     bl_idname = "import_scene.botw_dae_fbx"
@@ -18,26 +24,35 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     directory: StringProperty(name="Folder Path", subtype='DIR_PATH')
 
     def execute(self, context):
+        global PRINT_LATER
+        PRINT_LATER = []
         if not self.directory:
             self.report({'WARNING'}, "No folder selected")
             return {'CANCELLED'}
 
         self.ensure_scene_settings(context)
 
-        num_files = self.count_files_in_subdirs('.dae')
+        root_dir_name = self.directory.split(os.sep)[-2]
 
-        imported_files = 0
-        for root, _, files in os.walk(self.directory):
-            for file in files:
-                if file.lower().endswith(".dae"):
-                    without_ext = file.replace(".dae", "")
-                    asset_name = asset_names.get(without_ext, without_ext)
-                    filepath = os.path.join(root, file)
-                    print(f"Importing {imported_files}/{num_files}: {file} ({asset_name})")
-                    self.import_and_setup_single_dae(context, filepath, file, asset_name)
-                    imported_files += 1
+        for root, dirname, files in os.walk(self.directory):
+            dae_files = [f for f in files if f.lower().endswith(".dae")]
+            parent_coll = None
+            if len(dae_files) > 1:
+                parent_coll_name = root.split(os.sep)[-1]
+                if root_dir_name != parent_coll_name:
+                    parent_coll_name = asset_names.get(parent_coll_name, parent_coll_name)
+                    parent_coll = ensure_collection(context, parent_coll_name)
+            for dae_file in dae_files:
+                without_ext = dae_file.replace(".dae", "")
+                asset_name = asset_names.get(without_ext, without_ext)
+                if asset_name == without_ext and (without_ext.endswith("_A") or without_ext.endswith("_B")):
+                    asset_name = asset_names.get(without_ext[:-2], without_ext[:-2])
+                filepath = os.path.join(root, dae_file)
+                self.import_and_setup_single_dae(context, filepath, dae_file, asset_name, parent_coll)
 
-        self.report({'INFO'}, f"Imported {imported_files} FBX files")
+        for lateprint in PRINT_LATER:
+            print(lateprint)
+
         return {'FINISHED'}
 
     def count_files_in_subdirs(self, extension) -> int:
@@ -60,11 +75,13 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 area.spaces.active.shading.studio_light = 'botw.exr'
                 area.spaces.active.shading.color_type = 'TEXTURE'
 
-    def import_and_setup_single_dae(self, context,  filepath, filename, asset_name):
+    def import_and_setup_single_dae(self, context,  filepath, filename, asset_name, parent_coll):
         objs = self.import_dae(context, filepath, discard_types=('EMPTY'))
         objs = self.import_and_merge_fbx_data(context, dae_objs=objs, dae_path=filepath, asset_name=asset_name)
 
-        collection = ensure_collection(context, asset_name)
+        collection = ensure_collection(context, asset_name, parent=parent_coll)
+
+        load_png_images_from_directory(filepath)
 
         for obj in objs:
             collection.objects.link(obj)
@@ -79,14 +96,17 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     obj.animation_data.action = None
             elif obj.type == 'MESH':
                 obj['import_name'] = obj.name
-                split = obj.name.split("Mt_")
-                obj.name = asset_name + "_" + split[1]
+                if "Mt_" in obj.name:
+                    split = obj.name.split("_Mt_")
+                    obj.name = asset_name + "_" + split[0]
+                else:
+                    # Shame this print gets lost in collada import spam, sigh.
+                    print("Couldn't rename object: ", obj.name)
                 self.cleanup_mesh(obj, asset_name)
 
             obj.data.name = obj.name
 
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-        bpy.ops.outliner.orphans_purge()
 
     def import_and_merge_fbx_data(self, context, *, dae_objs, dae_path, asset_name):
         """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
@@ -112,13 +132,16 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             dae_obj.name = dae_obj.name.replace("_dae", "")
 
         dae_armatures = [ob for ob in dae_objs if ob.type=='ARMATURE']
-        assert len(fbx_armatures) == len(dae_armatures), f"The .fbx and the .dae have different number of armatures for {dae_path}. This shouldn't happen."
+        if len(fbx_armatures) == len(dae_armatures):
+            # Well, it does happen, with dungeon walls, for whatever reason.
+            f"The .fbx and the .dae have different number of armatures for {dae_path}. This shouldn't happen."
+
         for fbx_arm, dae_arm in zip(fbx_armatures, dae_armatures):
             dae_arm.user_remap(fbx_arm)
             ret_objs.remove(dae_arm)
             bpy.data.objects.remove(dae_arm)
 
-            fbx_arm.name = "Armature_"+asset_name
+            fbx_arm.name = "RIG-"+asset_name
             for pb in fbx_arm.pose.bones:
                 pb.custom_shape = ensure_widget('Bone')
                 if pb.name in ("Face_Root"):
@@ -150,7 +173,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     m.user_remap(bpy.data.materials.get(new_mat_name))
                 else:
                     m.name = new_mat_name
-            setup_material(m)
+            setup_material(obj, m)
 
     def import_fbx(self, context, filepath, discard_types=('MESH', 'EMPTY')):
         return self.import_dae_or_fbx(context, is_dae=False, filepath=filepath, discard_types=discard_types)
@@ -184,10 +207,77 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         enable_print(True)
         return context.selected_objects[:]
 
-def setup_material(material):
+def load_png_images_from_directory(file_path):
+    """
+    Loads all PNG images from the directory containing the given file path.
+    
+    :param file_path: The full path to a file in the target directory.
+    """
+    directory = os.path.dirname(file_path)  # Get the directory of the given file
+
+    if not os.path.exists(directory):
+        print("Directory does not exist.")
+        return
+
+    for file in os.listdir(directory):
+        if file.lower().endswith(".png") and file not in bpy.data.images:
+            image_path = os.path.join(directory, file)
+            img = bpy.data.images.load(image_path, check_existing=True)
+
+def setup_material(obj, material):
+    albedo = None
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    # Try to find an albedo texture. This usually imports with the fbx material.
+    for node in nodes:
+        if node.type == 'TEX_IMAGE':
+            img_name = os.path.basename(node.image.filepath)
+            existing_img = bpy.data.images.get(img_name)
+            if existing_img:
+                node.image.user_remap(existing_img)
+            if "_alb" in node.image.name.lower():
+                albedo = node.image
+
+    # Find all other textures with the same base name.
+    texture_set = []
+    if albedo:
+        textureset_name = albedo.name.split("_Alb")[0]
+        for img in bpy.data.images:
+            if img.name.startswith(textureset_name):
+                texture_set.append(img)
+
+    # Nuke the nodes as imported by .fbx, it's easier to built from scratch.
+    nodes.clear()
+
+    # Order the textures nicely
+    order = ["Alb", "AO", "Spm", "Nrm", "Emm", "Fx"]
+    texture_set.sort(key=lambda img: next((i for i, word in enumerate(order) if word in img.name), -1))
+
+    # Create image nodes, guess UV layer by name, set image color spaces
+    # (not sure why but I can't set image color space when loading images)
+    UVs = obj.data.uv_layers
+    for i, img in enumerate(texture_set):
+        img_node = nodes.new(type="ShaderNodeTexImage")
+        img_node.image = img
+        img_node.width = 400
+        img_node.location = (-300, i*-300)
+        if "alb" not in img.name.lower():
+            img.colorspace_settings.name = 'Non-Color'
+        elif "damage" not in img.name.lower() and "red_alb" not in img.name.lower():
+            nodes.active = img_node
+        if len(UVs) > 1:
+            uv_node = nodes.new(type="ShaderNodeUVMap")
+            links.new(uv_node.outputs[0], img_node.inputs[0])
+            uv_index = 1
+            if "alb" in img.name.lower() and "damage" not in img.name.lower():
+                uv_index = 0
+            uv_node.uv_map = UVs[uv_index].name
+            uv_node.location = img_node.location
+            uv_node.location.x -= 200
+
     # Load and position all detected relevant textures based on any existing texture nodes, while setting all non-Albedos to Non-Color colorspace.
     # Ensure the appropriate shader nodetree from resource.blend is present, and instance it. To determine what shader to use, we can only guess by names.
-    # Connect noodles.
 
     # HAYYAAAA. A single .dae/.fbx file can contain multiple meshes. It still holds true that one mesh is for one material. But get this; The fbx has more material information than the .dae. It has some texture nodes, which have file paths that at least end in a valid filename, while the .dae sometimes has this, but often not.
     # But remember, the .dae file has the UV maps.

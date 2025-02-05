@@ -1,0 +1,18 @@
+schema_version = "1.0.0"
+
+id = "botw_fbx_importer"
+version = "0.0.1"
+name = "BotW FBX Importer"
+tagline = "Automate import task for BotW"
+maintainer = "Community"
+type = "add-on"
+website = "blender.org"
+tags = ["Import-Export"]
+
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+[permissions]
+files = "Load .fbx files, Blender materials and widgets from disk"

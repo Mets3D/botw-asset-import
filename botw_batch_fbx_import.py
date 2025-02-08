@@ -3,10 +3,9 @@ import os, sys
 from bpy.props import StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
-import numpy as np
 from .asset_names import asset_names
 from .collections import ensure_collection
-from .widgets import ensure_widget
+from .widgets import ensure_widget, get_resources_blend_path
 from math import pi
 
 PRINT_LATER = []
@@ -63,6 +62,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         for lateprint in PRINT_LATER:
             print(lateprint)
 
+        bpy.ops.outliner.orphans_purge()
+
         return {'FINISHED'}
 
     def count_files_in_subdirs(self, extension) -> int:
@@ -112,7 +113,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 else:
                     # Shame this print gets lost in collada import spam, sigh.
                     print("Couldn't rename object: ", obj.name)
-                self.cleanup_mesh(obj, asset_name)
+                self.cleanup_mesh(context, obj, asset_name)
 
             obj.data.name = obj.name
 
@@ -170,7 +171,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         
         return ret_objs
 
-    def cleanup_mesh(self, obj, asset_name):
+    def cleanup_mesh(self, context, obj, asset_name):
         for uv_layer, name in zip(obj.data.uv_layers, ("Albedo", "SPM")):
             # TODO: Might need a check here to see if all coordinates are at (0,0) and remove if so.
             uv_layer.name = name
@@ -183,7 +184,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     m.user_remap(bpy.data.materials.get(new_mat_name))
                 else:
                     m.name = new_mat_name
-            setup_material(obj, m)
+            setup_material(context, obj, m)
 
     def import_fbx(self, context, filepath, discard_types=('MESH', 'EMPTY')):
         return self.import_dae_or_fbx(context, is_dae=False, filepath=filepath, discard_types=discard_types)
@@ -234,7 +235,7 @@ def load_png_images_from_directory(directory):
             img = bpy.data.images.load(image_path, check_existing=True)
             print("Loaded image: ", img.filepath)
 
-def setup_material(obj, material):
+def setup_material(context, obj, material):
     albedo = None
     nodes = material.node_tree.nodes
     links = material.node_tree.links
@@ -264,6 +265,8 @@ def setup_material(obj, material):
     order = ["Alb", "AO", "Spm", "Nrm", "Emm", "Fx"]
     texture_set.sort(key=lambda img: next((i for i, word in enumerate(order) if word in img.name), -1))
 
+    texture_nodes = {}
+
     # Create image nodes, guess UV layer by name, set image color spaces
     # (not sure why but I can't set image color space when loading images)
     UVs = obj.data.uv_layers
@@ -272,28 +275,132 @@ def setup_material(obj, material):
         img_node.image = img
         img_node.width = 400
         img_node.location = (-300, i*-300)
-        if "alb" not in img.name.lower():
+        name = img.name.lower()
+
+        if "alb" not in name:
             img.colorspace_settings.name = 'Non-Color'
-        elif "damage" not in img.name.lower() and "red_alb" not in img.name.lower():
+        elif "damage" not in name and "red_alb" not in name:
             nodes.active = img_node
         if len(UVs) > 1:
             uv_node = nodes.new(type="ShaderNodeUVMap")
             links.new(uv_node.outputs[0], img_node.inputs[0])
             uv_index = 1
-            if "alb" in img.name.lower() and "damage" not in img.name.lower():
+            if "alb" in name and "damage" not in name:
                 uv_index = 0
             uv_node.uv_map = UVs[uv_index].name
             uv_node.location = img_node.location
             uv_node.location.x -= 200
+        
+        # Guess texture types by names.
+        if "_alb" in name:
+            if "_red_alb" in name:
+                texture_nodes["Skin Redness"] = img_node
+            elif "_damage_alb" in name:
+                texture_nodes["Skin Damage"] = img_node
+            else:
+                texture_nodes["Albedo"] = img_node
+        elif "_spm" in name:
+            # TODO: Differentiate Spm, Spm.1 and Spm.2?
+            texture_nodes["SPM"] = img_node
+        elif "_nrm" in name:
+            texture_nodes["Normal"] = img_node
+        elif "_ao" in img.name:
+            texture_nodes["AO"] = img_node
+        elif "_emmmsk.1" in img.name:
+            # On elemental weapons, this is used for a scrolling energy texture.
+            texture_nodes["Emmission Mask 1"] = img_node
+        elif "_emmmsk.2" in img.name:
+            # On elemental weapons, the Green channel is useful for representing how charged the weapon is.
+            texture_nodes["Emmission Mask 2"] = img_node
 
-    # Load and position all detected relevant textures based on any existing texture nodes, while setting all non-Albedos to Non-Color colorspace.
-    # Ensure the appropriate shader nodetree from resource.blend is present, and instance it. To determine what shader to use, we can only guess by names.
+    # For now, just load the BotW: Cel Shade node tree.
+    node_tree = ensure_nodetree("BotW: Cel Shade")
+    # Ensure the lights are in the scene.
+    for lamp_prop in ("Sun Lamp", "Sphere Lamp"):
+        lamp_obj = node_tree[lamp_prop]
+        if lamp_obj not in set(context.scene.collection.all_objects):
+            context.scene.collection.objects.link(lamp_obj)
+    group_node = nodes.new("ShaderNodeGroup")
+    group_node.node_tree = node_tree
+    group_node.location = (200, 0)
+    group_node.width = 300
 
-    # HAYYAAAA. A single .dae/.fbx file can contain multiple meshes. It still holds true that one mesh is for one material. But get this; The fbx has more material information than the .dae. It has some texture nodes, which have file paths that at least end in a valid filename, while the .dae sometimes has this, but often not.
-    # But remember, the .dae file has the UV maps.
-    # So we need to decide if we want to transfer the materials from the fbx to the dae, or transfer the UVs from the dae to the fbx.
-    # By the way, neither contains as much data as Switch Tools is able to access, so that's sad.
-    pass
+    if 'Albedo' in texture_nodes:
+        links.new(texture_nodes['Albedo'].outputs['Color'], group_node.inputs['Albedo'])
+    if 'SPM' in texture_nodes:
+        links.new(texture_nodes['SPM'].outputs['Color'], group_node.inputs[f'SPM'])
+    if 'Normal' in texture_nodes:
+        links.new(texture_nodes['Normal'].outputs['Color'], group_node.inputs['Normal Map'])
+
+    # Output node
+    output_node = nodes.new("ShaderNodeOutputMaterial")
+    output_node.location = (600, 0)
+    links.new(group_node.outputs[0], output_node.inputs[0])
+
+    # About UV Maps:
+        # The first UV channel at least reliably seems to be the Albedo, yay.
+        # The second UV channel is usually the SPM/Normal UVs, BUT
+        # The second UV channel could also be for the Emission, in which case SPM/Normal share UVs with the Albedo.
+        # Could there be a case with 3 UV channels? Albedo + SPM/Normal + Emission?
+        # Could there be a case with 1 UV channel being used for all 3?
+        # Probably...!
+        # Let's try importing some meshes with Emm textures to see if we find any reliable pattern.
+            # All elemental weapons: 4 emission channels, 1 UV map
+                # While the hilt material uses the same albedo, the mesh name will always have "Sword" for the blade, and "Root" for the hilt. These need to be two separate materials, cannot be de-duplicated.
+                # EmmMsk.1: All 4 channels are the same. Used for showing a glowing energy flowing from the hilt to the tip of the blade when fully charged.
+                # EmmMsk.2: 
+                    # R is the gradient for when the flame is recharging along the blade. I think this is used in conjunction with the B channel.
+                    # G is used when the blade is fully charged and glowing overall.
+                    # B is also that, but sharper...? Maybe for when the blade is out of energy?
+
+    # About de-duplicating materials:
+        # This might not be as simple as checking for matching albedo textures.
+        # Apparently different meshes may use different UVMaps for the same texture. See Phantom Ganon Armor. Fuck me.
+        # For Emission it's not so bad if we're gonna have to manually assign emission color anyways, since even a connected emission texture with the wrong UVs won't be visible.
+        # But the Armorbody uses SPM UV for Nrm while Armorupper uses Albedo UV for Nrm... Then wtf happens.
+
+    # About SPM textures:
+        # If grayscale:
+            # - If it's just called "Spm" or "Spm1" it can go directly into the Smoothness input. (responsible for sketch lines)
+            # - Spm2 is for metal or rubber (no way to determine which :S)
+        # If multi-channel: 
+            # Smoothness and metal/rubber mask was merged into red/green channels respectively.
+            # We can read the pixel data in Py to determine if it is multi-channel or not.
+    # Check for "metal", "rubber", "hair" in the material name and set those values accordingly.
+    # Also, remember to set Alpha & Shadow blend mode to Alpha Clip.
+    
+    # Stuff that will likely have to be set manually:
+        # - Emission color
+        # - Hooking up SPM Y channel to correct Metal/Rubber input (maybe we can guess based on some keywords)
+        # - Setting correct sketch highlight Spread, by eye.
+
+    # Optional ideas:
+        # He recommends enabling Bloom, but that can now only be done in compositing. We can ship the files with this and mention it in ReadMe.
+        # Might be valid to de-duplicate eye materials from L/R?
+        # Since we can check pixel data, we could replace useless textures (all same color) with RGB nodes.
+
+def ensure_nodetree(nodetree_name) -> bpy.types.NodeTree:
+    """Load custom shapes by appending them from resources.blend, unless they already exist in this file."""
+    abs_path = get_resources_blend_path()
+    # Check if it already exists locally.
+    existing_nt = bpy.data.node_groups.get(nodetree_name)
+    if existing_nt:
+        # NodeTree exists, so just return it.
+        return existing_nt
+
+    # Import NodeTree from resources.blend file.
+    with bpy.data.libraries.load(abs_path, link=False, relative=False) as (
+        data_from,
+        data_to,
+    ):
+        for nt in data_from.node_groups:
+            if nt == nodetree_name:
+                data_to.node_groups.append(nt)
+
+    new_nt = bpy.data.node_groups.get((nodetree_name, None))
+
+    return new_nt
+
 
 def enable_print(bool):
     """For suppressing prints from fbx importer and remove_doubles()."""

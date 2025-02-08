@@ -320,10 +320,9 @@ def setup_material(context, obj, material):
     # This is not only important for the obvious reason of wanting to control them,
     # but not linking all of them to the scene actually results in a reference counting error,
     # and the objects would get deleted on file reload!
-    for prop_name in node_tree.keys():
-        value = node_tree[prop_name]
-        if type(value) == bpy.types.Object and value not in set(context.scene.collection.all_objects):
-            context.scene.collection.objects.link(value)
+    for obj in bpy.data.objects:
+        if 'LGT-botw' in obj.name and obj not in set(context.scene.collection.all_objects):
+            context.scene.collection.objects.link(obj)
 
     group_node = nodes.new("ShaderNodeGroup")
     group_node.node_tree = node_tree

@@ -315,11 +315,16 @@ def setup_material(context, obj, material):
 
     # For now, just load the BotW: Cel Shade node tree.
     node_tree = ensure_nodetree("BotW: Cel Shade")
-    # Ensure the lights are in the scene.
-    for lamp_prop in ("Sun Lamp", "Sphere Lamp"):
-        lamp_obj = node_tree[lamp_prop]
-        if lamp_obj not in set(context.scene.collection.all_objects):
-            context.scene.collection.objects.link(lamp_obj)
+
+    # Ensure the helper objects are linked to the scene.
+    # This is not only important for the obvious reason of wanting to control them,
+    # but not linking all of them to the scene actually results in a reference counting error,
+    # and the objects would get deleted on file reload!
+    for prop_name in node_tree.keys():
+        value = node_tree[prop_name]
+        if type(value) == bpy.types.Object and value not in set(context.scene.collection.all_objects):
+            context.scene.collection.objects.link(value)
+
     group_node = nodes.new("ShaderNodeGroup")
     group_node.node_tree = node_tree
     group_node.location = (200, 0)

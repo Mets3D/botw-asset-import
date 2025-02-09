@@ -7,6 +7,7 @@ from .asset_names import asset_names
 from .collections import ensure_collection
 from .widgets import ensure_widget, get_resources_blend_path
 from math import pi
+from mathutils import Vector
 
 PRINT_LATER = []
 
@@ -38,10 +39,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         # have the necessary textures next to them.
         # For example, Link's hair mesh is in Armor_Default/Armor_Default.fbx,
         # but the textures are in Link/Link_Hair_Alb.png.
-
         for root, subfolders, files in os.walk(self.directory):
-            for dirname in subfolders:
-                load_png_images_from_directory(os.path.join(root, dirname))
+            load_png_images_from_directory(root, files)
 
         for root, dirname, files in os.walk(self.directory):
             dae_files = [f for f in files if f.lower().endswith(".dae")]
@@ -75,8 +74,33 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         return file_count
 
     def ensure_scene_settings(self, context):
+        # Zelda shaders absolutely depend on EEVEE.
+        context.scene.render.engine = 'BLENDER_EEVEE_NEXT'
+
         # Set sRGB view transform, as that's what the game probably uses.
         context.scene.view_settings.view_transform = 'Standard'
+
+        if context.scene.world:
+            context.scene.world.use_fake_user = True
+            context.scene.world = None
+
+        if not context.scene.use_nodes:
+            # Enable compositing nodes.
+            context.scene.use_nodes = True
+            nodetree = context.scene.node_tree
+            nodes = nodetree.nodes
+            links = nodetree.links
+            # Add a Bloom node at the end of the compositing node tree.
+            output_node = nodes['Composite']
+            previous_socket = output_node.inputs[0].links[0].from_socket
+            bloom_node = nodes.new("CompositorNodeGlare")
+            bloom_node.glare_type = 'BLOOM'
+            bloom_node.quality = 'HIGH'
+            bloom_node.mix = -0.34
+            bloom_node.threshold = 1.28
+            bloom_node.size = 6
+            links.new(previous_socket, bloom_node.inputs['Image'])
+            links.new(bloom_node.outputs['Image'], output_node.inputs['Image'])
 
         # Set viewport shading to the BotW MatCap.
         for area in context.screen.areas:
@@ -85,6 +109,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 area.spaces.active.shading.light = 'MATCAP'
                 area.spaces.active.shading.studio_light = 'botw.exr'
                 area.spaces.active.shading.color_type = 'TEXTURE'
+                # Enable viewport compositing for bloom.
+                area.spaces.active.shading.use_compositor = 'ALWAYS'
 
     def import_and_setup_single_dae(self, context,  filepath, filename, asset_name, parent_coll):
         objs = self.import_dae(context, filepath, discard_types=('EMPTY'))
@@ -93,7 +119,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         collection = ensure_collection(context, asset_name, parent=parent_coll)
 
         for obj in objs:
-            collection.objects.link(obj)
+            if obj not in set(collection.objects):
+                collection.objects.link(obj)
             obj.select_set(True)
 
             if obj in set(context.scene.collection.objects):
@@ -113,6 +140,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 else:
                     # Shame this print gets lost in collada import spam, sigh.
                     print("Couldn't rename object: ", obj.name)
+                obj['dirname'] = os.path.basename(os.path.dirname(filepath))
+                obj['asset_name'] = asset_name
                 self.cleanup_mesh(context, obj, asset_name)
 
             obj.data.name = obj.name
@@ -126,6 +155,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         fbx_armatures = [o for o in fbx_objects if o.type == 'ARMATURE']
 
         if not fbx_objects:
+            print_later("No fbx objects imported for ", asset_name)
             return dae_objs
 
         ret_objs = dae_objs[:]
@@ -143,15 +173,18 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             dae_obj.name = dae_obj.name.replace("_dae", "")
 
         dae_armatures = [ob for ob in dae_objs if ob.type=='ARMATURE']
-        if len(fbx_armatures) == len(dae_armatures):
-            # Well, it does happen, with dungeon walls, for whatever reason.
-            f"The .fbx and the .dae have different number of armatures for {dae_path}. This shouldn't happen."
+
+        if len(fbx_armatures) == 0 and len(dae_armatures) == 1:
+            # This happens when an object doesn't really have a rig,
+            # .dae still imports a single bone, which I like, so let's pretend it's the good fbx armature!
+            fbx_armatures, dae_armatures = dae_armatures, fbx_armatures
 
         for fbx_arm, dae_arm in zip(fbx_armatures, dae_armatures):
             dae_arm.user_remap(fbx_arm)
             ret_objs.remove(dae_arm)
             bpy.data.objects.remove(dae_arm)
 
+        for fbx_arm in fbx_armatures:
             fbx_arm.name = "RIG-"+asset_name
             for pb in fbx_arm.pose.bones:
                 pb.custom_shape = ensure_widget('Bone')
@@ -175,16 +208,20 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         for uv_layer, name in zip(obj.data.uv_layers, ("Albedo", "SPM")):
             # TODO: Might need a check here to see if all coordinates are at (0,0) and remove if so.
             uv_layer.name = name
-        for m in obj.data.materials:
-            if 'Mt' in m.name:
-                orig_mat_name = m.name
+        for mat in obj.data.materials:
+            if 'Mt' in mat.name:
+                orig_mat_name = mat.name
                 obj['orig_mat_name'] = orig_mat_name
-                new_mat_name = asset_name + orig_mat_name.replace("Mt_", "_")
+                new_mat_name = obj['dirname'] + ": " + obj['import_name'].replace("_Mt_", "")
                 if new_mat_name in bpy.data.materials:
-                    m.user_remap(bpy.data.materials.get(new_mat_name))
+                    new_mat = bpy.data.materials.get(new_mat_name)
+
+                    mat.user_remap(new_mat)
+                    mat = new_mat
+                    continue
                 else:
-                    m.name = new_mat_name
-            setup_material(context, obj, m)
+                    mat.name = new_mat_name
+            setup_material(context, obj, mat)
 
     def import_fbx(self, context, filepath, discard_types=('MESH', 'EMPTY')):
         return self.import_dae_or_fbx(context, is_dae=False, filepath=filepath, discard_types=discard_types)
@@ -218,27 +255,40 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         enable_print(True)
         return context.selected_objects[:]
 
-def load_png_images_from_directory(directory):
+def load_png_images_from_directory(dirpath, files):
     """
     Loads all PNG images from the directory containing the given file path.
     
     :param file_path: The full path to a file in the target directory.
     """
+    for file in files:
+        filepath = os.path.join(dirpath, file)
+        if not os.path.exists(filepath):
+            print_later("File does not exist: ", filepath)
+            continue
 
-    if not os.path.exists(directory):
-        print("Directory does not exist.")
-        return
-
-    for file in os.listdir(directory):
         if file.lower().endswith(".png") and file not in bpy.data.images:
-            image_path = os.path.join(directory, file)
-            img = bpy.data.images.load(image_path, check_existing=True)
-            print("Loaded image: ", img.filepath)
+            img = bpy.data.images.load(filepath, check_existing=True)
+            # print_later("Loaded image: ", img.filepath)
 
 def setup_material(context, obj, material):
     albedo = None
     nodes = material.node_tree.nodes
     links = material.node_tree.links
+
+    mat_name = material.name.lower()
+    obj_name = obj.name.lower()
+    dirname = (obj.get('dirname') or "").lower()
+    asset_name = (obj.get('asset_name') or "").lower()
+    metal, rubber, hair = False, False, False
+
+    for suf in "LR", "RL":
+        if material.name.endswith("Eyeball_"+suf[0]):
+            existing = bpy.data.materials.get(material.name.replace(suf[0], suf[1]))
+            if existing:
+                material.user_remap(existing)
+                existing.name = existing.name[:-2]
+                return
 
     # Try to find an albedo texture. This usually imports with the fbx material.
     for node in nodes:
@@ -254,114 +304,215 @@ def setup_material(context, obj, material):
     texture_set = []
     if albedo:
         textureset_name = albedo.name.split("_Alb")[0]
-        for img in bpy.data.images:
-            if img.name.startswith(textureset_name):
-                texture_set.append(img)
-
+        obj['textureset_name'] = textureset_name
+    else:
+        textureset_name = obj['dirname']
+    for img in bpy.data.images:
+        if img.name.startswith(textureset_name):
+            texture_set.append(img)
+    obj['initial texture set'] = str([img.name for img in texture_set])
     # Nuke the nodes as imported by .fbx, it's easier to built from scratch.
     nodes.clear()
+
+    # Determine main shader type and filter textures based on whatever string data we have.
+    main_shader = nodes.new("ShaderNodeGroup")
+    shader_name = "BotW: Cel Shade"
+    if "eye" in obj_name:
+        shader_name = "BotW: Eye"
+    if "arrow" in dirname:
+        if dirname.endswith("_a"):
+            # arrow bundles.
+            if "stone" in mat_name:
+                texture_set = [img for img in texture_set if "_a_stone" in img.name.lower()]
+            else:
+                texture_set = [img for img in texture_set if "_A_" in img.name and "stone" not in img.name.lower()]
+        elif "stone" in mat_name:
+            texture_set = [img for img in texture_set if "stone" in img.name.lower()]
+        else:
+            texture_set = [img for img in texture_set if ("stone" not in img.name.lower()) and ("_A_" not in img.name)]
+
+        metal = True
+
+    if any(["Blade_Fx" in img.name for img in texture_set]):
+        if "blade" in material.name.lower():
+            shader_name = "BotW: Ancient Weapon Blade"
+            texture_set = [img for img in texture_set if "Blade_Fx" in img.name]
+        else:
+            texture_set = [img for img in texture_set if "Blade_Fx" not in img.name]
+    if any(["EmmMsk.1" in img.name for img in texture_set]) and not any([word in obj['orig_mat_name'].lower() for word in ('handle', '_02')]):
+        shader_name = "BotW: Elemental Weapon"
+    node_tree = ensure_shader(context, shader_name)
+    main_shader.node_tree = node_tree
+    main_shader.location = (200, 0)
+    main_shader.width = 300
+
+    # Output node
+    output_node = nodes.new("ShaderNodeOutputMaterial")
+    output_node.location = (600, 0)
+    links.new(main_shader.outputs[0], output_node.inputs[0])
 
     # Order the textures nicely
     order = ["Alb", "AO", "Spm", "Nrm", "Emm", "Fx"]
     texture_set.sort(key=lambda img: next((i for i, word in enumerate(order) if word in img.name), -1))
 
-    texture_nodes = {}
-
     # Create image nodes, guess UV layer by name, set image color spaces
     # (not sure why but I can't set image color space when loading images)
     UVs = obj.data.uv_layers
     for i, img in enumerate(texture_set):
-        img_node = nodes.new(type="ShaderNodeTexImage")
-        img_node.image = img
-        img_node.width = 400
-        img_node.location = (-300, i*-300)
-        name = img.name.lower()
+        # TODO: This could be more optimized by only calculating this once per image, after loading them. But meh, it's fast enough.
+        pixel_image = PixelImage(img)
+        if pixel_image.is_single_color:
+            # If the whole image is just one color, use an RGB node instead.
+            img_node = nodes.new(type="ShaderNodeRGB")
+            img_node.outputs[0].default_value = pixel_image[0]
+            img_node.label = img.name
+        else:
+            img_node = nodes.new(type="ShaderNodeTexImage")
+            img_node.image = img
+            img_node.width = 400
 
-        if "alb" not in name:
+        img_node.location = (-300, i*-300)
+        img_name = img.name.lower()
+
+        if "alb" not in img_name:
             img.colorspace_settings.name = 'Non-Color'
-        elif "damage" not in name and "red_alb" not in name:
-            nodes.active = img_node
         if len(UVs) > 1:
             uv_node = nodes.new(type="ShaderNodeUVMap")
             links.new(uv_node.outputs[0], img_node.inputs[0])
             uv_index = 1
-            if "alb" in name and "damage" not in name:
+            if "alb" in img_name and "damage" not in img_name:
                 uv_index = 0
             uv_node.uv_map = UVs[uv_index].name
-            uv_node.location = img_node.location
-            uv_node.location.x -= 200
-        
+            uv_node.location = img_node.location + Vector((-200, 0))
+
+        spm_has_green = False
+        socket_name = ""
         # Guess texture types by names.
-        if "_alb" in name:
-            if "_red_alb" in name:
-                texture_nodes["Skin Redness"] = img_node
-            elif "_damage_alb" in name:
-                texture_nodes["Skin Damage"] = img_node
-            else:
-                texture_nodes["Albedo"] = img_node
-        elif "_spm" in name:
+        if "_alb" in img_name:
+            socket_name = "Albedo"
+            if "_red_alb" in img_name:
+                socket_name = "Skin Red Albedo"
+            elif "_damage_alb" in img_name:
+                socket_name = "Skin Damage Albedo"
+
+            if shader_name == 'BotW: Eye':
+                if 'shadow' in img_name:
+                    socket_name = "Eye Shadow"
+                else:
+                    eye_rig_nt = ensure_shader(context, "BotW: Eye Rig")
+                    eye_rig_node = nodes.new("ShaderNodeGroup")
+                    eye_rig_node.node_tree = eye_rig_nt
+                    eye_rig_node.location = img_node.location + Vector((-400, 0))
+                    eye_rig_node.width = 300
+                    links.new(eye_rig_node.outputs[0], img_node.inputs[0])
+        elif "_spm" in img_name:
             # TODO: Differentiate Spm, Spm.1 and Spm.2?
-            texture_nodes["SPM"] = img_node
-        elif "_nrm" in name:
-            texture_nodes["Normal"] = img_node
-        elif "_ao" in img.name:
-            texture_nodes["AO"] = img_node
-        elif "_emmmsk.1" in img.name:
-            # On elemental weapons, this is used for a scrolling energy texture.
-            texture_nodes["Emmission Mask 1"] = img_node
-        elif "_emmmsk.2" in img.name:
-            # On elemental weapons, the Green channel is useful for representing how charged the weapon is.
-            texture_nodes["Emmission Mask 2"] = img_node
+            socket_name = "SPM"
+            if pixel_image.all_channels_match:
+                img_node.label = "SPM (channels match)"
+            elif pixel_image.has_green:
+                spm_has_green = True
+                img_node.label = "SPM (has green)"
+            else:
+                img_node.label = "SPM (no green)"
+        elif "_nrm" in img_name:
+            socket_name = "Normal Map"
+        elif "_ao" in img_name:
+            socket_name = "AO"
+        elif "_emmmsk_" in img_name:
+            # Scrolling textures for the obliterator only.
+            pass
+        elif "_emmmsk.2" in img_name:
+            # This only happens for elemental weapons and obliterator.
+            # Red channel is actual emission mask, green is a gradient for how charged the weapon is,
+            # but in the shader I just use a UV gradient instead of the green channel.
+            socket_name = "Emission Mask"
+            if 'thunder' in obj_name:
+                set_socket_value(main_shader, 'Emission Color', [0.307774, 0.416501, 0.067050, 1.000000])
+            if 'frost' in obj_name:
+                set_socket_value(main_shader, 'Emission Color', [0.133354, 0.280308, 0.418654, 1.000000])
 
-    # For now, just load the BotW: Cel Shade node tree.
-    node_tree = ensure_nodetree("BotW: Cel Shade")
+        elif "_emmmsk.1" in img_name or "_emmmsk" in img_name:
+            # It's a scrolling texture for the glow.
+            socket_name = "Emission Scroll"
+            # Only on elemental weapons and obliterator.
+            scroll_shader = ensure_shader(context, 'BotW: Weapon Glow Scroll')
+            scroll_node = nodes.new("ShaderNodeGroup")
+            scroll_node.location = img_node.location + Vector((-400, 0))
+            scroll_node.width = 350
+            scroll_node.node_tree = scroll_shader
+            links.new(scroll_node.outputs[0], img_node.inputs[0])
 
-    # Ensure the helper objects are linked to the scene.
-    # This is not only important for the obvious reason of wanting to control them,
-    # but not linking all of them to the scene actually results in a reference counting error,
-    # and the objects would get deleted on file reload!
-    for obj in bpy.data.objects:
-        if 'LGT-botw' in obj.name and obj not in set(context.scene.collection.all_objects):
-            context.scene.collection.objects.link(obj)
+        elif "_emmmsk" in img_name:
+            # Regular scrolling textures for most of the game.
+            socket_name = "Emission Scroll"
+        elif "_emm" in img_name:
+            socket_name = "Emission Mask"
+            if not pixel_image.all_channels_match:
+                # If the Emm texture has colors, it can be used as the emission color as well. (eg. Ancient Arrow)
+                emission_color = main_shader.inputs.get('Emission Color')
+                if emission_color:
+                    links.new(img_node.outputs[0], emission_color)
+        elif "blade_fx" in img_name:
+            socket_name = "Fx Texture"
+            distorted_img = nodes.new("ShaderNodeTexImage")
+            distorted_img.image = img_node.image
+            distorted_img.width = img_node.width
+            distorted_img.location = img_node.location + Vector((0, -300))
+            distortion_shader = ensure_shader(context, 'BotW: Ancient Weapon Blade Heat Distortion')
+            distortion_node = nodes.new("ShaderNodeGroup")
+            distortion_node.location = distorted_img.location + Vector((-400, 0))
+            distortion_node.width = 350
+            distortion_node.node_tree = distortion_shader
+            links.new(distortion_node.outputs[0], distorted_img.inputs[0])
+            links.new(distorted_img.outputs[0], main_shader.inputs['Fx Texture Distorted'])
 
-    group_node = nodes.new("ShaderNodeGroup")
-    group_node.node_tree = node_tree
-    group_node.location = (200, 0)
-    group_node.width = 300
+        # Hook up texture to the shader node group.
+        shader_socket = main_shader.inputs.get(socket_name)
+        img_node.label = socket_name
+        if shader_socket:
+            links.new(img_node.outputs['Color'], shader_socket)
+            if socket_name in ('Albedo', 'Fx Texture'):
+                nodes.active = img_node
+            if socket_name == 'Albedo' and pixel_image.has_alpha:
+                alpha_socket = main_shader.inputs.get('Alpha')
+                if alpha_socket:
+                    links.new(img_node.outputs['Alpha'], alpha_socket)
 
-    if 'Albedo' in texture_nodes:
-        links.new(texture_nodes['Albedo'].outputs['Color'], group_node.inputs['Albedo'])
-    if 'SPM' in texture_nodes:
-        links.new(texture_nodes['SPM'].outputs['Color'], group_node.inputs[f'SPM'])
-    if 'Normal' in texture_nodes:
-        links.new(texture_nodes['Normal'].outputs['Color'], group_node.inputs['Normal Map'])
+        # Set the Metal/Rubber/Hair checkboxes
+        metally_words = ['metal', 'blade', 'sword', 'weapon', 'helm', 'arrow']
+        rubbery_words = ['rubber']
+        hairy_words = ['hair', 'fur', 'mane']
+        if spm_has_green:
+            if any([word in obj_name for word in rubbery_words]):
+                rubber = True
+            elif any([word in obj_name for word in metally_words]):
+                metal = True
+        if any([word in obj_name for word in hairy_words]):
+            hair = True
 
-    # Output node
-    output_node = nodes.new("ShaderNodeOutputMaterial")
-    output_node.location = (600, 0)
-    links.new(group_node.outputs[0], output_node.inputs[0])
+        for socket_name, value in (('Rubber', rubber), ('Metal', metal), ('Hair', hair)):
+            socket = main_shader.inputs.get(socket_name)
+            if socket:
+                socket.default_value = value
 
-    # About UV Maps:
-        # The first UV channel at least reliably seems to be the Albedo, yay.
-        # The second UV channel is usually the SPM/Normal UVs, BUT
-        # The second UV channel could also be for the Emission, in which case SPM/Normal share UVs with the Albedo.
-        # Could there be a case with 3 UV channels? Albedo + SPM/Normal + Emission?
-        # Could there be a case with 1 UV channel being used for all 3?
-        # Probably...!
-        # Let's try importing some meshes with Emm textures to see if we find any reliable pattern.
-            # All elemental weapons: 4 emission channels, 1 UV map
-                # While the hilt material uses the same albedo, the mesh name will always have "Sword" for the blade, and "Root" for the hilt. These need to be two separate materials, cannot be de-duplicated.
-                # EmmMsk.1: All 4 channels are the same. Used for showing a glowing energy flowing from the hilt to the tip of the blade when fully charged.
-                # EmmMsk.2: 
-                    # R is the gradient for when the flame is recharging along the blade. I think this is used in conjunction with the B channel.
-                    # G is used when the blade is fully charged and glowing overall.
-                    # B is also that, but sharper...? Maybe for when the blade is out of energy?
+        # Hardcode some other values.
+        if 'ancient' in asset_name:
+            set_socket_value(main_shader, 'Emission Color', [1.000000, 0.245151, 0.025910, 1.000000])
+
+    # TODO:
+    # Double-check all Link armors (could also store some hard-coded values for the manual settings, like emission color and highlight spread.)
+    # Main characters
+    # Side NPCs
+    # Weapons
+    # Items
+
+    # De-duplicating textures?
+        # I noticed that at least a lot of the EmmMsk textures are exactly the same, but at different resolutions. Would be nice to use the best one
+        # But I can't think of great ways of identifying them. We can run a check for identical textures, sure, but for different sizes that won't work.
 
     # About de-duplicating materials:
-        # This might not be as simple as checking for matching albedo textures.
-        # Apparently different meshes may use different UVMaps for the same texture. See Phantom Ganon Armor. Fuck me.
-        # For Emission it's not so bad if we're gonna have to manually assign emission color anyways, since even a connected emission texture with the wrong UVs won't be visible.
-        # But the Armorbody uses SPM UV for Nrm while Armorupper uses Albedo UV for Nrm... Then wtf happens.
+        # This wouldn't be as simple as checking for matching albedo textures. Maybe at the end we can actually hash the node/link data and implement a smart, generic material de-duplication function.
 
     # About SPM textures:
         # If grayscale:
@@ -372,19 +523,18 @@ def setup_material(context, obj, material):
             # We can read the pixel data in Py to determine if it is multi-channel or not.
     # Check for "metal", "rubber", "hair" in the material name and set those values accordingly.
     # Also, remember to set Alpha & Shadow blend mode to Alpha Clip.
-    
-    # Stuff that will likely have to be set manually:
-        # - Emission color
-        # - Hooking up SPM Y channel to correct Metal/Rubber input (maybe we can guess based on some keywords)
-        # - Setting correct sketch highlight Spread, by eye.
 
-    # Optional ideas:
-        # He recommends enabling Bloom, but that can now only be done in compositing. We can ship the files with this and mention it in ReadMe.
-        # Might be valid to de-duplicate eye materials from L/R?
-        # Since we can check pixel data, we could replace useless textures (all same color) with RGB nodes.
+def set_socket_value(group_node, socket_name, socket_value, output=False):
+    socket = group_node.inputs.get(socket_name)
+    if not socket or output:
+        socket = group_node.outputs.get(socket_name)
+    if socket:
+        socket.default_value = socket_value
 
-def ensure_nodetree(nodetree_name) -> bpy.types.NodeTree:
-    """Load custom shapes by appending them from resources.blend, unless they already exist in this file."""
+def ensure_shader(context, nodetree_name) -> bpy.types.NodeTree:
+    """Append node tree from resources.blend, unless they already exist in this file.
+    Also de-duplicate resulting light objects and nested node trees.
+    """
     abs_path = get_resources_blend_path()
     # Check if it already exists locally.
     existing_nt = bpy.data.node_groups.get(nodetree_name)
@@ -403,7 +553,40 @@ def ensure_nodetree(nodetree_name) -> bpy.types.NodeTree:
 
     new_nt = bpy.data.node_groups.get((nodetree_name, None))
 
+    for nt in bpy.data.node_groups[:]:
+        if nt.name.startswith("BotW") and nt.name.endswith(".001"):
+            other = bpy.data.node_groups.get(nt.name[:-4])
+            if other:
+                nt.user_remap(other)
+                bpy.data.node_groups.remove(nt)
+
+    # Ensure the lighting objects are linked to the scene and de-duplicated.
+    for ob in bpy.data.objects[:]:
+        if 'LGT-botw' in ob.name:
+            if ob.name.endswith(".001"):
+                existing = bpy.data.objects.get(ob.name[:-4])
+                ob.user_remap(existing)
+                bpy.data.objects.remove(ob)
+                ob = existing
+            if ob not in set(context.scene.collection.all_objects):
+                context.scene.collection.objects.link(ob)
+
     return new_nt
+
+
+class PixelImage(list):
+    # Extract some very specific info about the pixel contents of a Blender image texture.
+    def __init__(self, bpy_img: bpy.types.Image):
+        # NOTE: Careful! Accessing bpy_img.pixels many times is very slow! Copying all of it once is fast!
+        pixels = bpy_img.pixels[:]
+        pixels = [tuple(pixels[i:i+4]) for i in range(0, len(pixels), 4)]
+        super().__init__(pixels)
+
+        self.is_single_color = all([p==self[0] for p in self])
+        self.has_green = any([p[1] for p in self])
+        self.has_blue = any([p[2] for p in self])
+        self.has_alpha = any([p[3]!=1 for p in self])
+        self.all_channels_match = all([p[0]==p[1]==p[2]==p[3] for p in self])
 
 
 def enable_print(bool):

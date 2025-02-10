@@ -196,6 +196,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
         fbx_path = dae_path.replace(".dae", ".fbx")
         fbx_objects = self.import_fbx(context, fbx_path, discard_types=('EMPTY'))
+        if not fbx_objects:
+            return
         fbx_armatures = [o for o in fbx_objects if o.type == 'ARMATURE']
 
         if not fbx_objects:
@@ -606,10 +608,13 @@ def setup_material(context, obj, material, image_map):
 
 
     # TODO:
-    # Main characters
-    # Side NPCs
+    # Humanoid NPCs
+    # Monster NPCs
+    # Animal NPCs
     # Weapons
-    # Items
+    # Inventory Items
+    # Environment Props (non-cel shaded)
+    # Terrain Props
 
     # Things I had to fix manually:
         # Barbarian set skin paint

@@ -81,4 +81,14 @@ def create_world_properties():
     var.targets[0].id = obj
     var.targets[0].data_path = f'data.shadow_soft_size'
 
+    # Time Seconds
+    world['Time Seconds'] = 0.0
+    world.id_properties_ui('Sun Rotation').update(min=-1.7976931348623157e+308, max=1.7976931348623157e+308)
+    drv_time = world.driver_add(f'["Time Seconds"]').driver
+    drv_time.expression = "frame / var"
+    var = drv_time.variables.new()
+    var.type = 'CONTEXT_PROP'
+    var.targets[0].context_property = 'ACTIVE_SCENE'
+    var.targets[0].data_path = 'render.fps'
+
 create_world_properties()

@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
-id = "botw_fbx_importer"
+id = "botw_importer"
 version = "0.0.1"
-name = "BotW FBX Importer"
-tagline = "Automate import task for BotW"
+name = "BotW Import/Cleanup"
+tagline = "Automate import tasks for BotW"
 maintainer = "Community"
 type = "add-on"
 website = "blender.org"
@@ -15,4 +15,4 @@ license = [
   "SPDX:GPL-3.0-or-later",
 ]
 [permissions]
-files = "Load .fbx files, Blender materials and widgets from disk"
+files = "Load .dae/.fbx/.png/.jpg/.blend files from disk"

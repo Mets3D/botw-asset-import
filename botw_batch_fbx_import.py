@@ -1,22 +1,35 @@
 import bpy, os, sys, re
-import os, sys
+from math import pi
+
+from mathutils import Vector
 from bpy.props import StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
+
 from .asset_names import asset_names
 from .collections import ensure_collection
 from .widgets import ensure_widget, get_resources_blend_path
-from math import pi
-from mathutils import Vector
+from . import __package__ as base_package
 
 PRINT_LATER = []
 
-TEXTURES_FOLDER = "D:\\BotW Assets\\Game Files Exported"
+ICON_EXTENSION = ".jpg"
 
 DYES = ["Default", "Blue", "Red", "Yellow", "White", "Black", "Purple", "Green", "Light Blue", "Navy", "Orange", "Peach", "Crimson", "Light Yellow", "Brown", "Gray"]
 
 def print_later(*msg):
     PRINT_LATER.append("".join(msg))
+
+
+def get_addon_prefs(context=None):
+    if not context:
+        context = bpy.context
+    if base_package.startswith('bl_ext'):
+        # 4.2
+        return context.preferences.addons[base_package].preferences
+    else:
+        return context.preferences.addons[base_package.split(".")[0]].preferences
+
 
 class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     """Import all FBX files from a selected folder recursively"""
@@ -33,6 +46,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             self.report({'WARNING'}, "No folder selected")
             return {'CANCELLED'}
 
+        prefs = get_addon_prefs(context)
+
         self.ensure_scene_settings(context)
 
         root_dir_name = self.directory.split(os.sep)[-2]
@@ -42,8 +57,10 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         # have the necessary textures next to them.
         # For example, Link's hair mesh is in Armor_Default/Armor_Default.fbx,
         # but the textures are in Link/Link_Hair_Alb.png.
+        # Hopefully the user has specified a folder with a full game extract in the add-on prefs, 
+        # otherwise we just use the selected folder and hope for the best.
         image_map = dict()
-        for root, subfolders, files in os.walk(TEXTURES_FOLDER): # supposed to be self.directory, but then it will fail if a texture isn't in the mesh's folder, which is often.
+        for root, _subfolders, files in os.walk(prefs.game_models_folder or self.directory):
             image_map.update(load_png_images_from_directory(root, files))
 
         counter = 0
@@ -71,6 +88,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         text = bpy.data.texts.get('ensure_botw_shading_props.py')
         if text:
             exec(text.as_string())
+
+        deduplicate_materials(context)
 
         return {'FINISHED'}
 
@@ -125,8 +144,22 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         objs = self.import_dae(context, filepath, discard_types=('EMPTY'))
         objs = self.import_and_merge_fbx_data(context, dae_objs=objs, dae_path=filepath, asset_name=asset_name)
 
+        dirname = os.path.basename(os.path.dirname(filepath))
         collection = ensure_collection(context, asset_name, parent=parent_coll)
 
+        prefs = get_addon_prefs(context)
+
+        collection.asset_mark()
+        if prefs.game_icons_folder:
+            override = context.copy()
+            override["id"] = collection
+            icon_filepath = os.path.join(prefs.game_icons_folder, filename.replace(".dae", ""), filename.replace(".dae", ICON_EXTENSION))
+            print_later("ICON FILEPATH: ", icon_filepath)
+            if os.path.exists(icon_filepath):
+                with context.temp_override(**override):
+                    bpy.ops.ed.lib_id_load_custom_preview(filepath=icon_filepath)
+
+        offsets = {}
         for obj in objs:
             if obj not in set(collection.objects):
                 collection.objects.link(obj)
@@ -137,7 +170,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 context.scene.collection.objects.unlink(obj)
 
             if obj.type == 'ARMATURE':
-                obj.location.x += counter
+                offsets[obj] = counter
                 if obj.animation_data and obj.animation_data.action:
                     obj.animation_data.action = None
             elif obj.type == 'MESH':
@@ -148,15 +181,16 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     if obj.name.endswith("_"):
                         obj.name = obj.name[:-1]
                 else:
-                    # Shame this print gets lost in collada import spam, sigh.
-                    print("Couldn't rename object: ", obj.name)
-                obj['dirname'] = os.path.basename(os.path.dirname(filepath))
+                    print_later("Couldn't rename object: ", obj.name)
+                obj['dirname'] = dirname
                 obj['asset_name'] = asset_name
                 self.cleanup_mesh(context, obj, asset_name, image_map)
 
             obj.data.name = obj.name
 
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+        # for obj, offset in offsets:
+        #     obj.location.x += offset
 
     def import_and_merge_fbx_data(self, context, *, dae_objs, dae_path, asset_name):
         """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
@@ -215,6 +249,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         return ret_objs
 
     def cleanup_mesh(self, context, obj, asset_name, image_map):
+        assert obj.type == 'MESH'
         for uv_layer, name in zip(obj.data.uv_layers, ("Albedo", "SPM")):
             # TODO: Might need a check here to see if all coordinates are at (0,0) and remove if so.
             uv_layer.name = name
@@ -280,15 +315,20 @@ def load_png_images_from_directory(dirpath, files):
             print_later("File does not exist: ", filepath)
             continue
 
-        if file.lower().endswith(".png") and file not in bpy.data.images:
+        if file.lower().endswith(".png"):
             images[file] = filepath
-            # bpy.data.images.load(filepath, check_existing=True)
 
     return images
 
 def setup_material(context, obj, material, image_map):
+    """A giant function that tries to set up complete materials based on nothing but the single
+    Albedo texture that (usually) gets imported with the .fbx, relying entirely on naming conventions and hardcoding."""
+
     albedo = None
     nodes = material.node_tree.nodes
+    if 'BotW Output' in nodes:
+        # This material was already processed, don't process it again as that might break stuff.
+        return
     links = material.node_tree.links
 
     lc_matname = material.name.lower()
@@ -309,11 +349,16 @@ def setup_material(context, obj, material, image_map):
     for node in nodes:
         if node.type == 'TEX_IMAGE':
             img_name = os.path.basename(node.image.filepath)
+            obj['img_name'] = img_name
+            if img_name not in image_map:
+                continue
             real_img_path = image_map[img_name]
             existing_img = bpy.data.images.get(img_name)
             if existing_img:
+                obj['existing_img'] = True
                 node.image.user_remap(existing_img)
             else:
+                obj['loaded_img'] = real_img_path
                 node.image = bpy.data.images.load(real_img_path, check_existing=True)
             if "_alb" in node.image.name.lower():
                 albedo = node.image
@@ -331,7 +376,7 @@ def setup_material(context, obj, material, image_map):
             if not img:
                 img = bpy.data.images.load(filepath, check_existing=True)
             texture_set.append(img)
-    obj['initial texture set'] = str([img.name for img in texture_set])
+
     # Nuke the nodes as imported by .fbx, it's easier to built from scratch.
     nodes.clear()
 
@@ -372,6 +417,7 @@ def setup_material(context, obj, material, image_map):
     # Output node
     output_node = nodes.new("ShaderNodeOutputMaterial")
     output_node.location = (600, 0)
+    output_node.name = "BotW Output"
     links.new(main_shader.outputs[0], output_node.inputs[0])
 
     # Order the textures nicely
@@ -384,6 +430,7 @@ def setup_material(context, obj, material, image_map):
     # (not sure why but I can't set image color space when loading images)
     UVs = obj.data.uv_layers
     albedo_count = 0
+    dye_count = 0
     for i, img in enumerate(texture_set):
         # TODO: This could be more optimized by only calculating this once per image, after loading them. But meh, it's fast enough.
         pixel_image = PixelImage(img)
@@ -397,10 +444,7 @@ def setup_material(context, obj, material, image_map):
             img_node.image = img
             img_node.width = 400
 
-        offset = 0
-        if albedo_count > 1:
-            offset = albedo_count
-        img_node.location = (-300, (i-offset)*-300)
+        img_node.location = (-300, (i-dye_count)*-300)
         img_name = img.name.lower()
 
         if "alb" not in img_name:
@@ -428,8 +472,9 @@ def setup_material(context, obj, material, image_map):
                 # You can dye armors in the game, and those have different albedo textures.
                 # Let's stack them above the default one, in a compact way.
                 if albedo_count > 0:
+                    dye_count += 1
                     img_node.label = str(albedo_count) + ": " + DYES[albedo_count]
-                    img_node.location = (-300, albedo_count*60)
+                    img_node.location = (-300, dye_count*60)
                     img_node.hide = True
                 albedo_count += 1
 
@@ -549,6 +594,16 @@ def setup_material(context, obj, material, image_map):
         # Hardcode some other values.
         if 'ancient' in lc_assetname:
             set_socket_value(main_shader, 'Emission Color', [1.000000, 0.245151, 0.025910, 1.000000])
+        if 'orig_mat_name' in obj:
+            if obj['orig_mat_name'] == 'Mt_Lens':
+                set_socket_value(main_shader, 'Alpha', 0.05)
+            if obj['asset_name'] == 'Fierce Deity Mask' and obj['orig_mat_name'] == 'Mt_Eyeemm':
+                set_socket_value(main_shader, 'Emission Color', [0.700000, 0.700000, 0.700000, 1.000000])
+                set_socket_value(main_shader, 'Emission Mask', 1.0)
+                # Don't even load more textures, this glowing eye material doesn't need them. 
+                # (And the Emission Mask must stay unconnected.)
+                break
+
 
     # TODO:
     # Main characters
@@ -556,12 +611,9 @@ def setup_material(context, obj, material, image_map):
     # Weapons
     # Items
 
-    # De-duplicating textures?
-        # I noticed that at least a lot of the EmmMsk textures are exactly the same, but at different resolutions. Would be nice to use the best one
-        # But I can't think of great ways of identifying them. We can run a check for identical textures, sure, but for different sizes that won't work.
-
-    # About de-duplicating materials:
-        # This wouldn't be as simple as checking for matching albedo textures. Maybe at the end we can actually hash the node/link data and implement a smart, generic material de-duplication function.
+    # Things I had to fix manually:
+        # Barbarian set skin paint
+        # Moblin Mask's mesh actually exports slightly borked, some pieces are on the floor, huh.
 
 def set_socket_value(group_node, socket_name, socket_value, output=False):
     socket = group_node.inputs.get(socket_name)
@@ -634,6 +686,38 @@ def ensure_shader(context, nodetree_name) -> bpy.types.NodeTree:
                 bpy.data.node_groups.remove(nt)
 
     return new_nt
+
+def deduplicate_materials(context):
+    """Crunch relevant data into a hash, then user remap if this hash already existed."""
+
+    mat_hashes = {}
+    copy_counter = {}
+    for mat in bpy.data.materials:
+        str_data = ""
+        if not mat.use_nodes:
+            continue
+        group = mat.node_tree.nodes.get("Group")
+        if not group:
+            continue
+        str_data += group.node_tree.name
+        for in_socket in group.inputs:
+            str_data += str(in_socket.default_value)
+            for link in in_socket.links:
+                if link.from_node.type == 'TEX_IMAGE' and link.from_node.image:
+                    str_data += link.from_node.image.filepath
+
+        mat_hash = hash(str_data)
+        if mat_hash in mat_hashes:
+            print("Duplicate material: ", mat.name, mat_hashes[mat_hash].name)
+            mat.user_remap(mat_hashes[mat_hash])
+            if mat_hash not in copy_counter:
+                copy_counter[mat_hash] = 0
+            copy_counter[mat_hash] += 1
+        else:
+            mat_hashes[mat_hash] = mat
+
+    for mat_hash, count in copy_counter.items():
+        print(mat_hashes[mat_hash].name, "had", count, "duplicates.")
 
 
 class PixelImage(list):

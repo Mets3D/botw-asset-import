@@ -11,6 +11,7 @@ module_names = (
     "asset_names",
     "widgets",
     "matcap",
+    "prefs",
 )
 
 

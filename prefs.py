@@ -23,8 +23,4 @@ class BotWImportPreferences(AddonPreferences):
         layout.prop(self, 'game_models_folder')
         layout.prop(self, 'game_icons_folder')
 
-        main_col = layout.column(align=True)
-        main_col.row(align=True).prop(self, 'advanced_mode')
-        main_col.separator()
-
 registry = [BotWImportPreferences]

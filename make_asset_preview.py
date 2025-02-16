@@ -13,6 +13,7 @@ class ASSETBROWSER_OT_viewport_render_asset_thumbnail(bpy.types.Operator):
 
     def execute(self, context):
         id = context.id
+        bpy.ops.ed.lib_id_generate_preview()
         bpy.ops.render.opengl()
         render_result = next(image for image in bpy.data.images if image.type == "RENDER_RESULT")
         if not render_result:

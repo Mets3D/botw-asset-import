@@ -158,7 +158,6 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             override = context.copy()
             override["id"] = collection
             icon_filepath = os.path.join(prefs.game_icons_folder, filename.replace(".dae", ""), filename.replace(".dae", ICON_EXTENSION))
-            print_later("ICON FILEPATH: ", icon_filepath)
             if os.path.exists(icon_filepath):
                 with context.temp_override(**override):
                     bpy.ops.ed.lib_id_load_custom_preview(filepath=icon_filepath)
@@ -269,9 +268,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             # TODO: Might need a check here to see if all coordinates are at (0,0) and remove if so.
             uv_layer.name = name
         for mat in obj.data.materials:
+            orig_mat_name = mat.name
             if 'Mt' in mat.name:
-                orig_mat_name = mat.name
-                obj['orig_mat_name'] = orig_mat_name
                 new_mat_name = asset_name + ": " + orig_mat_name.split("Mt_")[1]
                 if new_mat_name in bpy.data.materials:
                     new_mat = bpy.data.materials.get(new_mat_name)
@@ -281,6 +279,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     continue
                 else:
                     mat.name = new_mat_name
+            obj['orig_mat_name'] = orig_mat_name
+
             setup_material(context, obj, mat, image_map)
 
     def import_fbx(self, context, filepath, discard_types=('MESH', 'EMPTY')):
@@ -354,6 +354,8 @@ def figure_out_asset_name(dae_filename: str, dirname: str, is_single_file: bool)
             if weapon_name:
                 asset_name = weapon_name + " Sheath"
                 break
+    if asset_name == without_ext and "Enemy" in asset_name:
+        asset_name = asset_names.get(asset_name.replace("Enemy_", ""), asset_name)
 
     return asset_name
 
@@ -693,7 +695,10 @@ def setup_material(context, obj, material, image_map):
 
 
     # TODO:
-    # Inventory Items
+    # Just like environment props (incl treasure chests and shrines), plants are non-cel-shaded, except for Acorns.
+        # Things that ARE cel-shaded: All monster and animal parts, all seasoning (milk, grain, egg, etc), all ore, NPCs, animals, motorbike, Link's gadgets including ice blocks
+        # Things that are NOT cel-shaded: All plants, shrines, environment props, treasure chests
+
     # Environment Props (non-cel shaded)
     # Terrain Props (non-cel shaded)
 
@@ -709,6 +714,7 @@ def setup_material(context, obj, material, image_map):
         # Some animals had the wrong textures hooked up. Could've been improved in the import code, but cba.
 
     # Things to do with final cleanup script or manual:
+        # Check for any image nodes with no image.
         # Make sure any uses of the Ancient Weapon Blade shader have the Alpha hooked up from the same node as the Fx Texture Distorted input rather than anything else.
         # Remove any "_###" regex match from material names.
         # Make sure to apply transforms (first check if anything is un-applied and check if it's correct)

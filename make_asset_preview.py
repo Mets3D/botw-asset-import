@@ -9,12 +9,20 @@ class ASSETBROWSER_OT_viewport_render_asset_thumbnail(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return bool(context.id)
+        if hasattr(context, 'id'):
+            return bool(context.id)
 
     def execute(self, context):
         id = context.id
         bpy.ops.ed.lib_id_generate_preview()
+        overlays_bkp = True
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                overlays_bkp = area.spaces.active.overlay.show_overlays
+                area.spaces.active.overlay.show_overlays = False
+                break
         bpy.ops.render.opengl()
+        area.spaces.active.overlay.show_overlays = overlays_bkp
         render_result = next(image for image in bpy.data.images if image.type == "RENDER_RESULT")
         if not render_result:
             self.report({'ERROR'}, "Couldn't find Render Result image.")

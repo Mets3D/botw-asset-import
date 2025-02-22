@@ -12,7 +12,8 @@ module_names = (
     "widgets",
     "matcap",
     "prefs",
-    "make_asset_preview"
+    "make_asset_preview",
+    "op_isolate_asset_collection",
 )
 
 

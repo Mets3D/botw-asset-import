@@ -30,6 +30,8 @@ def get_addon_prefs(context=None):
     else:
         return context.preferences.addons[base_package.split(".")[0]].preferences
 
+def camel_to_spaces(str):
+    return re.sub(r'(?<!^)(?=[A-Z])', ' ', str)
 
 class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     """Import all FBX files from a selected folder recursively"""
@@ -61,7 +63,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         # otherwise we just use the selected folder and hope for the best.
         image_map = dict()
         for root, _subfolders, files in os.walk(prefs.game_models_folder or self.directory):
-            image_map.update(load_png_images_from_directory(root, files))
+            image_map.update(map_img_filename_to_path(root, files))
 
         counter = 0
         for root, _subdirs, files in os.walk(self.directory):
@@ -163,9 +165,12 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     bpy.ops.ed.lib_id_load_custom_preview(filepath=icon_filepath)
 
         offsets = {}
-        for obj in objs:
+        for obj in objs[:]:
             if obj not in set(collection.objects):
-                collection.objects.link(obj)
+                try:
+                    collection.objects.link(obj)
+                except ReferenceError:
+                    continue
             obj.select_set(True)
 
             if obj in set(context.scene.collection.objects):
@@ -176,6 +181,9 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 offsets[obj] = counter
                 if obj.animation_data and obj.animation_data.action:
                     obj.animation_data.action = None
+                if len(obj.data.bones) < 2:
+                    bpy.data.objects.remove(obj)
+                    continue
             elif obj.type == 'MESH':
                 obj['import_name'] = obj.name
                 if "Mt_" in obj.name:
@@ -185,18 +193,32 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                         obj.name = obj.name[:-1]
                 else:
                     print_later("Couldn't rename object: ", obj.name)
+                for clumsyname in ("_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane"):
+                    if clumsyname in obj.name:
+                        obj.name = obj.name.split(clumsyname)[0]
+                if obj.name.endswith("_Root"):
+                    obj.name = obj.name[:-5]
+
+                for m in obj.modifiers:
+                    if m.type == 'ARMATURE' and not m.object:
+                        obj.modifiers.remove(m)
+
                 obj['dirname'] = dirname
                 obj['asset_name'] = asset_name
-                
-                if ("UMii" in obj['dirname'] and 'hair' in obj['dirname'].lower()) or any([word in asset_name for word in ('Backpack')]):
+
+                if ("UMii" in obj['dirname'] and 'hair' in obj['dirname'].lower()) or 'Backpack' in asset_name:
                     # Generic NPC hair objects are weirdly transformed...
                     obj.rotation_euler.y -= pi/2
                     obj.rotation_euler.z -= pi/2
-                    obj.location.x = -obj.parent.location.z
+                    if obj.parent:
+                        obj.location.x = -obj.parent.location.z
                     obj.location.z = 0
                 self.cleanup_mesh(context, obj, asset_name, image_map)
                 obj.rotation_euler = (0, 0, 0)
+                if obj['dirname'].startswith("Obj_"):
+                    obj.rotation_euler = (pi/2, 0, 0)
 
+            obj.rotation_euler = (0, 0, 0)
             obj.data.name = obj.name
 
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
@@ -315,12 +337,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         enable_print(True)
         return context.selected_objects[:]
 
-def load_png_images_from_directory(dirpath, files):
-    """
-    Loads all PNG images from the directory containing the given file path.
-    
-    :param file_path: The full path to a file in the target directory.
-    """
+def map_img_filename_to_path(dirpath, files):
+    """Loads all PNG images which are directly in the directory."""
 
     images = {}
     prefs = get_addon_prefs()
@@ -344,18 +362,31 @@ def load_png_images_from_directory(dirpath, files):
 def figure_out_asset_name(dae_filename: str, dirname: str, is_single_file: bool):
     without_ext = dae_filename.replace(".dae", "")
     asset_name = asset_names.get(without_ext, without_ext)
+
+    # If the asset name wasn't in the dictionary, try without any _A, _B suffixes.
     if asset_name == without_ext and (without_ext.endswith("_A") or without_ext.endswith("_B")):
         asset_name = asset_names.get(without_ext[:-2], without_ext[:-2])
+
+    # If an asset directory only has one .dae file and its name wasn't in the asset dictionary, try the dictionary's name instead.
     if asset_name == without_ext and is_single_file:
         asset_name = asset_names.get(dirname, asset_name)
+
+    # Guess Weapon sheaths based on the entries for weapons in the dictionary.
     for find, replace in (("Lsheath", "Lsword"), ("SpearSheath", "Spear"), ("Sheath", "Sword")):
         if asset_name == without_ext and find in asset_name:
             weapon_name = asset_names.get(asset_name.replace(find, replace))
             if weapon_name:
                 asset_name = weapon_name + " Sheath"
                 break
+
+    # Make the "Enemy_" prefix optional in the dictionary.
     if asset_name == without_ext and "Enemy" in asset_name:
         asset_name = asset_names.get(asset_name.replace("Enemy_", ""), asset_name)
+
+    # Most "Obj_" prefix meshes won't be in the dictionary, since they don't have any in-game strings that are exposed to the player. (non-cel shaded environment meshes)
+    # So to avoid having to add all of these to the dictionary, just do some string operations.
+    if asset_name.startswith("Obj_"):
+        asset_name = camel_to_spaces(asset_name[4:].replace("_", " "))
 
     return asset_name
 
@@ -388,17 +419,14 @@ def setup_material(context, obj, material, image_map):
     for node in nodes:
         if node.type == 'TEX_IMAGE':
             img_name = os.path.basename(node.image.filepath)
-            obj['img_name'] = img_name
             if img_name not in image_map:
                 continue
             real_img_path = image_map[img_name]
             existing_img = bpy.data.images.get(img_name)
-            # TODO: Remap textures to the Models Folder.
             if existing_img:
-                obj['existing_img'] = True
+                existing_img.filepath = real_img_path
                 node.image.user_remap(existing_img)
             else:
-                obj['loaded_img'] = real_img_path
                 node.image = bpy.data.images.load(real_img_path, check_existing=True)
             if "_alb" in node.image.name.lower():
                 albedo = node.image
@@ -454,6 +482,9 @@ def setup_material(context, obj, material, image_map):
         shader_name = "BotW: Divine Eye"
     if any(["clrmak" in img.name.lower() or "clrmsk" in img.name.lower() for img in texture_set]):
         shader_name = "BotW: Generic NPC"
+    if obj['dirname'].startswith("Obj"):
+        shader_name = "BotW: Smooth Shade"
+
     node_tree = ensure_shader(context, shader_name)
     main_shader.node_tree = node_tree
     main_shader.location = (200, 0)
@@ -695,9 +726,11 @@ def setup_material(context, obj, material, image_map):
 
 
     # TODO:
+    # Don't forget Silent Princess, something went wrong with it.
     # Just like environment props (incl treasure chests and shrines), plants are non-cel-shaded, except for Acorns.
         # Things that ARE cel-shaded: All monster and animal parts, all seasoning (milk, grain, egg, etc), all ore, NPCs, animals, motorbike, Link's gadgets including ice blocks
         # Things that are NOT cel-shaded: All plants, shrines, environment props, treasure chests
+        # This tree in the rain has a rim-light though! https://youtu.be/By7qcgaqGI4?si=5xvTPrF5cqHRILym&t=792
 
     # Environment Props (non-cel shaded)
     # Terrain Props (non-cel shaded)
@@ -714,6 +747,8 @@ def setup_material(context, obj, material, image_map):
         # Some animals had the wrong textures hooked up. Could've been improved in the import code, but cba.
 
     # Things to do with final cleanup script or manual:
+        # Make sure linked library paths have relative path.
+        # Make sure lighting set-up is good, since we cut overall cel shaded lighting strength by 2/3rds
         # Check for any image nodes with no image.
         # Make sure any uses of the Ancient Weapon Blade shader have the Alpha hooked up from the same node as the Fx Texture Distorted input rather than anything else.
         # Remove any "_###" regex match from material names.
@@ -786,7 +821,7 @@ def ensure_shader(context, nodetree_name) -> bpy.types.NodeTree:
         return existing_nt
 
     # Import NodeTree from resources.blend file.
-    with bpy.data.libraries.load(abs_path, link=False, relative=False) as (
+    with bpy.data.libraries.load(abs_path, link=True, relative=True) as (
         data_from,
         data_to,
     ):

@@ -54,12 +54,13 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
 
         root_dir_name = self.directory.split(os.sep)[-2]
 
-        # First we walk through the folders and import all images.
+        # First we walk through the folders and make a mapping of all images from 
+        # their name to their filepath in the Models directory.
         # This has to be done in advance before importing meshes because not all meshes
         # have the necessary textures next to them.
         # For example, Link's hair mesh is in Armor_Default/Armor_Default.fbx,
         # but the textures are in Link/Link_Hair_Alb.png.
-        # Hopefully the user has specified a folder with a full game extract in the add-on prefs, 
+        # Hopefully the user has specified a folder with an extracted Models folder in the add-on prefs, 
         # otherwise we just use the selected folder and hope for the best.
         image_map = dict()
         for root, _subfolders, files in os.walk(prefs.game_models_folder or self.directory):
@@ -193,7 +194,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                         obj.name = obj.name[:-1]
                 else:
                     print_later("Couldn't rename object: ", obj.name)
-                for clumsyname in ("_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane"):
+                for clumsyname in ("_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane", "pSolid"):
                     if clumsyname in obj.name:
                         obj.name = obj.name.split(clumsyname)[0]
                 if obj.name.endswith("_Root"):
@@ -726,7 +727,6 @@ def setup_material(context, obj, material, image_map):
 
 
     # TODO:
-    # Don't forget Silent Princess, something went wrong with it.
     # Just like environment props (incl treasure chests and shrines), plants are non-cel-shaded, except for Acorns.
         # Things that ARE cel-shaded: All monster and animal parts, all seasoning (milk, grain, egg, etc), all ore, NPCs, animals, motorbike, Link's gadgets including ice blocks
         # Things that are NOT cel-shaded: All plants, shrines, environment props, treasure chests

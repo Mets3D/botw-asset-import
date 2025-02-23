@@ -1,5 +1,6 @@
 import bpy
-from bpy.types import Context, Collection, LayerCollection
+from bpy.props import BoolProperty
+from bpy.types import Collection, LayerCollection
 
 
 class ASSETBROWSER_OT_isolate_collection_asset(bpy.types.Operator):
@@ -8,6 +9,8 @@ class ASSETBROWSER_OT_isolate_collection_asset(bpy.types.Operator):
     bl_idname = "ed.isolate_collection_asset"
     bl_label = "Isolate Collection"
     bl_options = {'REGISTER', 'UNDO'}
+
+    focus_view: BoolProperty(name="Focus View")
 
     def execute(self, context):
         collection = context.id
@@ -31,6 +34,17 @@ class ASSETBROWSER_OT_isolate_collection_asset(bpy.types.Operator):
                 context.view_layer.layer_collection, coll
             )
             layer_collection.hide_viewport = coll not in colls
+
+        if self.focus_view:
+            bpy.ops.object.select_all(action='DESELECT')
+            for obj in collection.all_objects:
+                obj.select_set(True)
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    region = next(r for r in area.regions if r.type=='WINDOW')
+                    with context.temp_override(area=area, region=region):
+                        bpy.ops.view3d.view_selected()
+                    break
 
         return {'FINISHED'}
 

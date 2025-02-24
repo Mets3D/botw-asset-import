@@ -25,7 +25,10 @@ class ASSETBROWSER_OT_isolate_collection_asset(bpy.types.Operator):
 
         for coll in bpy.data.collections:
             if coll in colls:
+                # Children of selected collections
+                colls += coll.children_recursive
                 continue
+            # Parents of selected collections
             if any([child in colls for child in coll.children_recursive]):
                 colls.append(coll)
 

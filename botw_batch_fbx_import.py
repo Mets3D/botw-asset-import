@@ -7,7 +7,7 @@ from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
 
 from .asset_names import asset_names
-from .collections import ensure_collection
+from .collections import ensure_collection, set_active_collection
 from .widgets import ensure_widget, get_resources_blend_path
 from . import __package__ as base_package
 
@@ -17,9 +17,10 @@ ICON_EXTENSION = ".jpg"
 
 DYES = ["Default", "Blue", "Red", "Yellow", "White", "Black", "Purple", "Green", "Light Blue", "Navy", "Orange", "Peach", "Crimson", "Light Yellow", "Brown", "Gray"]
 
+OBJ_PREFIXES = ["Obj_", "TwnObj_", "FldObj_", "DgnObj_", "DgnMrgPrt_"]
+
 def print_later(*msg):
     PRINT_LATER.append("".join(msg))
-
 
 def get_addon_prefs(context=None):
     if not context:
@@ -71,6 +72,9 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             dae_files = [f for f in files if f.lower().endswith(".dae") and "Fxmdl" not in f]
             parent_coll = None
             dirname = root.split(os.sep)[-1]
+            if dirname.endswith("_Far"):
+                # These are LOD meshes, we don't want those.
+                continue
             if len(dae_files) > 1:
                 parent_coll_name = root.split(os.sep)[-1]
                 if root_dir_name != parent_coll_name:
@@ -146,17 +150,23 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 area.spaces.active.shading.use_compositor = 'ALWAYS'
 
     def import_and_setup_single_dae(self, context,  filepath, filename, asset_name, parent_coll, counter=0, image_map={}):
+        dirname = os.path.basename(os.path.dirname(filepath))
+
+        # Create the collection and set it as active so all the objects get imported there to begin with.
+        collection = ensure_collection(context, asset_name, parent=parent_coll)
+        set_active_collection(context, collection)
+
         objs = self.import_dae(context, filepath, discard_types=('EMPTY'))
         objs = self.import_and_merge_fbx_data(context, dae_objs=objs, dae_path=filepath, asset_name=asset_name)
         if not objs:
             return
 
-        dirname = os.path.basename(os.path.dirname(filepath))
-        collection = ensure_collection(context, asset_name, parent=parent_coll)
-
         prefs = get_addon_prefs(context)
 
         collection.asset_mark()
+
+        # Try to load an in-game icon for this asset, 
+        # if user has specified an icon dirpath in the add-on preferences.
         if prefs.game_icons_folder:
             override = context.copy()
             override["id"] = collection
@@ -166,18 +176,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     bpy.ops.ed.lib_id_load_custom_preview(filepath=icon_filepath)
 
         offsets = {}
-        for obj in objs[:]:
-            if obj not in set(collection.objects):
-                try:
-                    collection.objects.link(obj)
-                except ReferenceError:
-                    continue
-            obj.select_set(True)
-
-            if obj in set(context.scene.collection.objects):
-                # This happens for the FBX armatures.
-                context.scene.collection.objects.unlink(obj)
-
+        for obj in context.selected_objects:
             if obj.type == 'ARMATURE':
                 offsets[obj] = counter
                 if obj.animation_data and obj.animation_data.action:
@@ -207,6 +206,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 obj['dirname'] = dirname
                 obj['asset_name'] = asset_name
 
+                # Fix rotations.
                 if ("UMii" in obj['dirname'] and 'hair' in obj['dirname'].lower()) or 'Backpack' in asset_name:
                     # Generic NPC hair objects are weirdly transformed...
                     obj.rotation_euler.y -= pi/2
@@ -214,12 +214,14 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     if obj.parent:
                         obj.location.x = -obj.parent.location.z
                     obj.location.z = 0
-                self.cleanup_mesh(context, obj, asset_name, image_map)
-                obj.rotation_euler = (0, 0, 0)
-                if obj['dirname'].startswith("Obj_"):
-                    obj.rotation_euler = (pi/2, 0, 0)
+                else:
+                    obj.rotation_euler = (0, 0, 0)
+                    for prefix in OBJ_PREFIXES:
+                        if obj['dirname'].startswith(prefix):
+                            obj.rotation_euler = (pi/2, 0, 0)
 
-            obj.rotation_euler = (0, 0, 0)
+                self.cleanup_mesh(context, obj, asset_name, image_map)
+
             obj.data.name = obj.name
 
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
@@ -254,11 +256,6 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             bpy.data.objects.remove(fbx_obj)
 
         dae_armatures = [ob for ob in context.selected_objects if ob.type=='ARMATURE']
-
-        if len(fbx_armatures) == 0 and len(dae_armatures) == 1:
-            # This happens when an object doesn't really have a rig,
-            # .dae still imports a single bone, which I like, so let's pretend it's the good fbx armature!
-            fbx_armatures, dae_armatures = dae_armatures, fbx_armatures
 
         for fbx_arm, dae_arm in zip(fbx_armatures, dae_armatures):
             dae_arm.user_remap(fbx_arm)
@@ -386,8 +383,11 @@ def figure_out_asset_name(dae_filename: str, dirname: str, is_single_file: bool)
 
     # Most "Obj_" prefix meshes won't be in the dictionary, since they don't have any in-game strings that are exposed to the player. (non-cel shaded environment meshes)
     # So to avoid having to add all of these to the dictionary, just do some string operations.
-    if asset_name.startswith("Obj_"):
-        asset_name = camel_to_spaces(asset_name[4:].replace("_", " "))
+    for prefix in OBJ_PREFIXES:
+        if asset_name.startswith(prefix):
+            asset_name = asset_name[len(prefix):]
+
+    asset_name = camel_to_spaces(asset_name.replace("_", " "))
 
     return asset_name
 
@@ -483,8 +483,9 @@ def setup_material(context, obj, material, image_map):
         shader_name = "BotW: Divine Eye"
     if any(["clrmak" in img.name.lower() or "clrmsk" in img.name.lower() for img in texture_set]):
         shader_name = "BotW: Generic NPC"
-    if obj['dirname'].startswith("Obj"):
-        shader_name = "BotW: Smooth Shade"
+    for prefix in OBJ_PREFIXES:
+        if obj['dirname'].startswith(prefix):
+            shader_name = "BotW: Smooth Shade"
 
     node_tree = ensure_shader(context, shader_name)
     main_shader.node_tree = node_tree
@@ -658,6 +659,11 @@ def setup_material(context, obj, material, image_map):
             distortion_node.node_tree = distortion_shader
             links.new(distortion_node.outputs[0], distorted_img.inputs[0])
             links.new(distorted_img.outputs[0], main_shader.inputs['Fx Texture Distorted'])
+        elif "_mtl" in lc_img_name:
+            socket_name = "Metallic"
+            set_socket_value(main_shader, 'Roughness', 0.6)
+        elif "_msk" in lc_img_name:
+            socket_name = "Alpha"
 
         # Hook up texture to target socket on the shader node group.
         shader_socket = main_shader.inputs.get(socket_name)
@@ -829,7 +835,7 @@ def ensure_shader(context, nodetree_name) -> bpy.types.NodeTree:
             if nt == nodetree_name:
                 data_to.node_groups.append(nt)
 
-    new_nt = bpy.data.node_groups.get((nodetree_name, None))
+    new_nt = bpy.data.node_groups.get(nodetree_name)
 
     for nt in bpy.data.node_groups[:]:
         if nt.name.startswith("BotW") and nt.name.endswith(".001"):

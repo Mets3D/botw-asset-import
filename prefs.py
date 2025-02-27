@@ -5,14 +5,14 @@ class BotWImportPreferences(AddonPreferences):
     bl_idname = __package__
 
     game_models_folder: StringProperty(
-        name="Models Folder",
+        name="Textures Folder",
         subtype='FILE_PATH',
-        description="Path to extracted BotW Models folder, with the .png textures within each sub-folder"
+        description="If the path to Link's head texture on your system is this:\nD:\\BotW Extracted\\Models\\Link\\Link_Head_Alb.png\nThen in this box you should browse this:\nD:\\BotW Extracted\\Models\\"
     )
     game_icons_folder: StringProperty(
         name="Icons Folder",
         subtype='FILE_PATH',
-        description="Path to folder of extracted BotW Icons, in .jpg format"
+        description="If the path to the Ancient Arrow's inventory icon is this:\nD:\\BotW Extracted\\Icons\\AncientArrow\\AncientArrow.jpg\nThen in this box you should browse this:\nD:\\BotW Extracted\\Icons\\"
     )
 
     def draw(self, context):

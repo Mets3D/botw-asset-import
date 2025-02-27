@@ -14,6 +14,10 @@ module_names = (
     "prefs",
     "make_asset_preview",
     "op_isolate_asset_collection",
+    "op_rename_asset",
+    "op_armature_merge",
+    "op_actions_merge",
+    "io_anim_seanim",
 )
 
 

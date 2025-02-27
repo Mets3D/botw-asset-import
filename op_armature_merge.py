@@ -1,0 +1,45 @@
+import bpy
+
+
+class OBJECT_OT_botw_armature_merge(bpy.types.Operator):
+    """Merge armatures into one, merging duplicates."""
+
+    bl_idname = "object.botw_merge_armatures"
+    bl_label = "BotW: Merge Armatures"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        for obj in context.selected_objects:
+            if obj.type != 'ARMATURE':
+                obj.select_set(False)
+        
+        for obj in context.selected_objects:
+            for bone in obj.data.bones:
+                bone['parent'] = bone.parent.name if bone.parent else ""
+                bone['name'] = bone.name
+
+        bpy.ops.object.join()
+        bpy.ops.object.mode_set(mode='EDIT')
+
+        for obj in context.selected_objects:
+            for ebone in obj.data.edit_bones:
+                bone = obj.data.bones[ebone.name]
+                if bone.name != bone['name']:
+                    other_ebone = obj.data.edit_bones[bone['name']]
+                    ebone.parent = other_ebone
+                    if not other_ebone.parent and bone['parent']:
+                        parent_ebone = obj.data.edit_bones[bone['parent']]
+                        other_ebone.parent = parent_ebone
+                    print("Remove: ", ebone.name)
+                    obj.data.edit_bones.remove(ebone)
+
+        for child in obj.children_recursive:
+            for m in child.modifiers:
+                if m.type == 'ARMATURE' and not m.object:
+                    m.object = obj
+
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        return {'FINISHED'}
+
+registry = [OBJECT_OT_botw_armature_merge]

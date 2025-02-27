@@ -3,7 +3,7 @@ import bpy, os
 class ASSETBROWSER_OT_viewport_render_asset_thumbnail(bpy.types.Operator):
     """Create an asset preview from a viewport render."""
 
-    bl_idname = "ed.asset_preview_from_viewport"
+    bl_idname = "asset.thumbnail_from_viewport"
     bl_label = "Viewport Render Asset Thumbnail"
     bl_options = {'REGISTER', 'UNDO'}
 

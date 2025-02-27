@@ -18,6 +18,63 @@ ICON_EXTENSION = ".jpg"
 DYES = ["Default", "Blue", "Red", "Yellow", "White", "Black", "Purple", "Green", "Light Blue", "Navy", "Orange", "Peach", "Crimson", "Light Yellow", "Brown", "Gray"]
 
 OBJ_PREFIXES = ["Obj_", "TwnObj_", "FldObj_", "DgnObj_", "DgnMrgPrt_"]
+PRIMITIVE_NAMES = ["_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane", "pSolid"]
+
+"""
+    Notes on animations:
+    Data can get lost on the way both from Switch Toolbox and to Blender. Both import and export processes require a skeleton, and if it's missing any bones that have animation data, that data will be discarded.
+    It's not really possible to get around this and get the animation data directly, I mean I'm sure it's possible, but the data is stored in an extremely confusing way.
+    Trust me, it is best to find the appropriate skeleton and use it for exporting and importins.
+
+    We've added a batch animation export to Switch Toolbox. Hopefully in most cases, animation files contain a perfect skeleton. I know this is not the case for Master Cycle Zero, at least.
+    TODO: add prints when an animation file does not have an ideal skeleton, and in this case, manually browse models. Although even then, it won't really work, since if an animation affects multiple armatures, I won't be able to merge the armatures in Switch Toolbox. The animation will have to be exported once for each affected rig. Maybe this is never done this way but I think it might be.
+
+    In Blender, we've added prints to the SEAnim importer to let us know when we're importing with an armature that doesn't have all the necessary bones.
+    And we have an operator to merge armatures. But this still needs a functionality to add a root bone. Or we have to go over everything with a script to add a Root bone.
+"""
+
+
+"""
+    TODO:
+    TwnObj
+    FldObj
+    DgnObj
+    consider the DgnMrgPrt and MergedGrudge stuff but probably ignore them.
+
+    Things I had to fix manually:
+        Korok albedo colors since they're procedurally done
+        Some eye materials that didn't get detected as eye materials at first (now they should, but I didn't want to re-import.)
+        Barbarian set skin paint
+        Moblin Mask's mesh actually exports slightly borked, some pieces are on the floor, huh.
+        Similar deal with one of the generic Zora children, they had their body jewelry on the floor.
+        For generic NPC meshes, set albedo tints for the materials.
+        A lot of work on assembly of Hylian NPC heads.
+        A lot of work on enemy materials, and setting up re-skins as separate assets with shared mesh data.
+        Some animals had the wrong textures hooked up. Could've been improved in the import code, but cba.
+
+    Things to do with final cleanup script or manual:
+        Make sure resources.blend is linked from the same directory and with a relative path.
+        Make sure lighting set-up is good, since we cut overall cel shaded lighting strength by 2/3rds
+        Check for any image nodes with no image.
+
+        Try to remove "A", "B" and numbers from asset names.
+        Remove pointless "_Model" from obnames.
+        Rename obdatas to obname
+        Rename materials to the albedo name with _Alb ending, and numbering if necessary.
+        Remove unnecessary .001 material name endings.
+        Remove any "_###" regex match from material names.
+
+        Make sure any uses of the Ancient Weapon Blade shader have the Alpha hooked up from the same node as the Fx Texture Distorted input rather than anything else.
+        Make sure to apply transforms (first check if anything is un-applied and check if it's correct)
+        Maybe remove 1-bone armatures, especially if the bone's name is just "Root" (that's a .dae importer thing, not real data from the game)
+            Also remove Armature modifiers without a target.
+        Re-ensure that active texture is most ideal; Albedo, or Emission, or SPM, or Normal.
+        Could fairly easily de-duplicate SPM UVMap nodes
+        Could try hashing pixel data to de-duplicate textures. Otherwise, compare their average color and if it falls within a threshold, list them out.
+        Everything has this awful metallic viewport material from the fbx import...
+        Make sure armature bone positions are reset. Plenty of cases where they imported with pose data.
+        Make sure SPM and Nrm textures are non-color and Alb are sRGB (although check first). Some Emm are sRGB and some aren't, so leave those alone.
+"""
 
 def print_later(*msg):
     PRINT_LATER.append("".join(msg))
@@ -37,7 +94,7 @@ def camel_to_spaces(str):
 class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     """Import all FBX files from a selected folder recursively"""
     bl_idname = "import_scene.botw_dae_fbx"
-    bl_label = "Import BotW assets from folders of .dae and optionally .fbx files (the armature will be taken from the latter if present)"
+    bl_label = "Import BotW .dae + .fbx"
     bl_options = {'REGISTER', 'UNDO'}
 
     directory: StringProperty(name="Folder Path", subtype='DIR_PATH')
@@ -186,16 +243,19 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     continue
             elif obj.type == 'MESH':
                 obj['import_name'] = obj.name
-                if "Mt_" in obj.name:
+                if "_Mt_" in obj.name:
                     split = obj.name.split("_Mt_")
                     obj.name = asset_name + "_" + split[0]
+                    for primitive in PRIMITIVE_NAMES:
+                        if primitive in obj.name:
+                            obj.name = asset_name + "_" + split[1]
                     if obj.name.endswith("_"):
                         obj.name = obj.name[:-1]
                 else:
                     print_later("Couldn't rename object: ", obj.name)
-                for clumsyname in ("_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane", "pSolid"):
-                    if clumsyname in obj.name:
-                        obj.name = obj.name.split(clumsyname)[0]
+                for primitive in PRIMITIVE_NAMES:
+                    if primitive in obj.name:
+                        obj.name = obj.name.split(primitive)[0]
                 if obj.name.endswith("_Root"):
                     obj.name = obj.name[:-5]
 
@@ -289,7 +349,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             uv_layer.name = name
         for mat in obj.data.materials:
             orig_mat_name = mat.name
-            if 'Mt' in mat.name:
+            if 'Mt_' in mat.name:
                 new_mat_name = asset_name + ": " + orig_mat_name.split("Mt_")[1]
                 if new_mat_name in bpy.data.materials:
                     new_mat = bpy.data.materials.get(new_mat_name)
@@ -424,11 +484,11 @@ def setup_material(context, obj, material, image_map):
                 continue
             real_img_path = image_map[img_name]
             existing_img = bpy.data.images.get(img_name)
-            if existing_img:
-                existing_img.filepath = real_img_path
+            if existing_img and existing_img != node.image:
                 node.image.user_remap(existing_img)
             else:
                 node.image = bpy.data.images.load(real_img_path, check_existing=True)
+            node.image.filepath = real_img_path
             if "_alb" in node.image.name.lower():
                 albedo = node.image
 
@@ -440,13 +500,15 @@ def setup_material(context, obj, material, image_map):
     else:
         textureset_name = obj['dirname']
     for img_name, filepath in image_map.items():
+        real_img_path = image_map[img_name]
         if img_name.startswith(textureset_name):
             if "eye" in img_name.lower() and "eye" not in textureset_name.lower():
                 # This avoids eg. animals using their eye textures for the body material.
                 continue
             img = bpy.data.images.get(img_name)
             if not img:
-                img = bpy.data.images.load(filepath, check_existing=True)
+                img = bpy.data.images.load(real_img_path, check_existing=True)
+            img.filepath = real_img_path
             texture_set.append(img)
 
     # Nuke the nodes as imported by .fbx, it's easier to built from scratch.
@@ -731,49 +793,6 @@ def setup_material(context, obj, material, image_map):
         set_socket_value(main_shader, 'Tint 0 Color', [0.023805, 0.023805, 0.023805, 1.000000])
         set_socket_value(main_shader, 'Metal', True)
 
-
-    # TODO:
-    # Just like environment props (incl treasure chests and shrines), plants are non-cel-shaded, except for Acorns.
-        # Things that ARE cel-shaded: All monster and animal parts, all seasoning (milk, grain, egg, etc), all ore, NPCs, animals, motorbike, Link's gadgets including ice blocks
-        # Things that are NOT cel-shaded: All plants, shrines, environment props, treasure chests
-        # This tree in the rain has a rim-light though! https://youtu.be/By7qcgaqGI4?si=5xvTPrF5cqHRILym&t=792
-
-    # Environment Props (non-cel shaded)
-    # Terrain Props (non-cel shaded)
-
-    # Things I had to fix manually:
-        # Korok albedo colors since they're procedurally done
-        # Some eye materials that didn't get detected as eye materials at first (now they should, but I didn't want to re-import.)
-        # Barbarian set skin paint
-        # Moblin Mask's mesh actually exports slightly borked, some pieces are on the floor, huh.
-        # Similar deal with one of the generic Zora children, they had their body jewelry on the floor.
-        # For generic NPC meshes, set albedo tints for the materials.
-        # A lot of work on assembly of Hylian NPC heads.
-        # A lot of work on enemy materials, and setting up re-skins as separate assets with shared mesh data.
-        # Some animals had the wrong textures hooked up. Could've been improved in the import code, but cba.
-
-    # Things to do with final cleanup script or manual:
-        # Make sure linked library paths have relative path.
-        # Make sure lighting set-up is good, since we cut overall cel shaded lighting strength by 2/3rds
-        # Check for any image nodes with no image.
-        # Make sure any uses of the Ancient Weapon Blade shader have the Alpha hooked up from the same node as the Fx Texture Distorted input rather than anything else.
-        # Remove any "_###" regex match from material names.
-        # Make sure to apply transforms (first check if anything is un-applied and check if it's correct)
-        # Maybe remove 1-bone armatures, especially if the bone's name is just "Root" (that's a .dae importer thing, not real data from the game)
-            # Also remove Armature modifiers without a target.
-        # Re-ensure that Albedo textures are active, or Emission, or SPM, or Normal.
-        # Remove unnecessary .001 material name endings.
-        # Could fairly easily de-duplicate SPM UVMap nodes
-        # Could try hashing pixel data to de-duplicate textures. Otherwise, compare their average color and if it falls within a threshold, list them out.
-        # Everything has this awful metallic viewport material from the fbx import...
-        # Make sure to apply transforms
-        # Make sure armature bone positions are reset. There was at least one case.
-        # Remove pointless "_Model" from obnames.
-        # Rename obdatas to obname
-        # Make sure SPM and Nrm textures are non-color and Alb are sRGB (although check first). Some Emm are sRGB and some aren't, so leave those alone.
-        # Include resources.blend and replace the nodegroups with linked ones, obvs.
-        # Go over object and material names again because we've added some more asset names. In fact, we should print anything that doesn't have an asset name, because ideally everything should have one.
-
 def set_socket_value(group_node, socket_name, socket_value, output=False):
     socket = group_node.inputs.get(socket_name)
     if not socket or output:
@@ -912,7 +931,7 @@ def enable_print(bool):
 
 # Register the operator
 def menu_func_import(self, context):
-    self.layout.operator(OUTLINER_OT_import_botw_dae_and_fbx.bl_idname, text=OUTLINER_OT_import_botw_dae_and_fbx.bl_label)
+    self.layout.operator(OUTLINER_OT_import_botw_dae_and_fbx.bl_idname, text="BotW (.dae & .fbx)")
 
 def register():
     bpy.utils.register_class(OUTLINER_OT_import_botw_dae_and_fbx)

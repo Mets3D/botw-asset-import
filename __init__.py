@@ -28,15 +28,6 @@ modules = [
     for submod in module_names
 ]
 
-def get_addon_prefs(context=None):
-    if not context:
-        context = bpy.context
-    if __package__.startswith('bl_ext'):
-        # 4.2
-        return context.preferences.addons[__package__].preferences
-    else:
-        return context.preferences.addons[__package__.split(".")[0]].preferences
-
 def register_unregister_modules(modules: list, register: bool):
     """Recursively register or unregister modules by looking for either
     un/register() functions or lists named `registry` which should be a list of

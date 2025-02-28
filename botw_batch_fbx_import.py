@@ -9,8 +9,7 @@ from bpy_extras.io_utils import ImportHelper
 from .asset_names import asset_names
 from .collections import ensure_collection, set_active_collection
 from .widgets import ensure_widget, get_resources_blend_path
-from . import __package__ as base_package
-from . import get_addon_prefs
+from .prefs import get_addon_prefs
 
 PRINT_LATER = []
 

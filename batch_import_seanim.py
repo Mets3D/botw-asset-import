@@ -1,5 +1,5 @@
 import bpy, os
-from . import get_addon_prefs
+from .prefs import get_addon_prefs
 from .io_anim_seanim.import_seanim import load_seanim
 
 class SCENE_OT_import_batch_seanim(bpy.types.Operator):

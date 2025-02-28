@@ -1,3 +1,5 @@
+# This is a modified version of the .seanim importer add-on, tweaked for cleaner BotW batch-importing.
+
 import bpy
 from bpy.props import StringProperty, CollectionProperty, EnumProperty, BoolProperty
 from bpy_extras.io_utils import ExportHelper, ImportHelper
@@ -7,7 +9,7 @@ import time
 bl_info = {
     "name": "SEAnim Support",
     "author": "SE2Dev",
-    "version": (0, 4, 3),
+    "version": (0, 4, 4),
     "blender": (2, 80, 0),
     "location": "File > Import",
     "description": "Import SEAnim",
@@ -18,15 +20,17 @@ bl_info = {
     "category": "Import-Export"
 }
 
-# To support reload properly, try to access a package var, if it's there,
-# reload everything
-if "bpy" in locals():
-    import imp
-    if "import_seanim" in locals():
-        imp.reload(import_seanim)
-else:
-    from . import import_seanim
+from . import(
+    export_seanim,
+    import_seanim,
+    seanim,
+)
 
+modules = [
+    export_seanim,
+    import_seanim,
+    seanim,
+]
 
 class ImportSEAnim(bpy.types.Operator, ImportHelper):
     bl_idname = "import_scene.seanim"
@@ -41,13 +45,13 @@ class ImportSEAnim(bpy.types.Operator, ImportHelper):
 
     def execute(self, context):
         from . import import_seanim
-        result = import_seanim.load(
-            self, context, **self.as_keywords(ignore=("filter_glob", "files")))
-        if not result:
-            return {'FINISHED'}
-        else:
-            self.report({'ERROR'}, result)
+        actions = import_seanim.load(
+            context, operator=self, **self.as_keywords(ignore=("filter_glob", )))
+        if not actions:
             return {'CANCELLED'}
+
+        self.report({'INFO'}, f"Imported {len(actions)} actions.")
+        return {'FINISHED'}
 
     @classmethod
     def poll(self, context):
@@ -192,22 +196,13 @@ def menu_func_seanim_import(self, context):
 def menu_func_seanim_export(self, context):
     self.layout.operator(ExportSEAnim.bl_idname, text="SEAnim (.seanim)")
 
-
-'''
-    CLASS REGISTRATION
-    SEE https://wiki.blender.org/wiki/Reference/Release_Notes/2.80/Python_API/Addons
-'''
-
-classes = (
+registry = [
     ImportSEAnim,
     ExportSEAnim
-)
+]
 
 
 def register():
-    for cls in classes:
-        bpy.utils.register_class(cls)
-
     bpy.types.TOPBAR_MT_file_import.append(menu_func_seanim_import)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_seanim_export)
 
@@ -215,11 +210,3 @@ def register():
 def unregister():
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_seanim_import)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_seanim_export)
-
-    for cls in classes:
-        bpy.utils.unregister_class(cls)
-
-
-
-if __name__ == "__main__":
-    register()

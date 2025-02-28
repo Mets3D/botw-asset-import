@@ -2,6 +2,9 @@ import bpy
 from mathutils import Vector, Quaternion
 from bpy_extras.wm_utils.progress_report import ProgressReport
 import os
+from mathutils import Euler
+from math import pi
+
 from . import seanim as SEAnim
 
 # <pep8 compliant>
@@ -67,7 +70,7 @@ def generate_fcurves(action_fcurves, tag_name, _type, count):
             for index in range(count)]
 
 
-def load(self, context, filepath=""):
+def load(context, files, filepath="", operator=None):
     ob = context.active_object
     if ob.type != 'ARMATURE':
         return "An armature must be selected!"
@@ -75,27 +78,17 @@ def load(self, context, filepath=""):
     path = os.path.dirname(filepath)
     path = os.path.normpath(path)
 
-    if not ob.animation_data:
-        ob.animation_data_create()
-
-
     with ProgressReport(context.window_manager) as progress:
         # Begin the progress counter with 1 step for each file
-        progress.enter_substeps(len(self.files))
+        progress.enter_substeps(len(files))
 
-        # Force all bones to use quaternion rotation
-        # (Must be included or bone.rotation_quaternion won't update
-        #  properly when setting the matrix directly)
-        for bone in ob.pose.bones.data.bones:
-            bone.rotation_mode = 'QUATERNION'
-
-        total_files = len(self.files)
-        for i, f in enumerate(self.files):
+        total_files = len(files)
+        for i, f in enumerate(files):
             print(f"Loading file {i}/{total_files}")
             progress.enter_substeps(1, f.name)
             try:
                 anim_path = os.path.normpath(os.path.join(path, f.name))
-                load_seanim(self, context, progress, anim_path)
+                load_seanim(context, progress, anim_path, operator)
             except Exception as e:
                 progress.leave_substeps("ERROR: " + repr(e))
             else:
@@ -130,11 +123,18 @@ def remove_redundant_keyframes(action, threshold=1e-6):
             else:
                 i += 1  # Only increment if we didn't delete to avoid skipping elements
 
-def load_seanim(self, context, progress, filepath=""):
+def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=True) -> bpy.types.Action:
     anim = SEAnim.Anim(filepath)
 
-    # Import the animation data
     ob = context.active_object
+    if not ob.animation_data:
+        ob.animation_data_create()
+
+    # Force all bones to use quaternion rotation
+    # (Must be included or bone.rotation_quaternion won't update
+    #  properly when setting the matrix directly)
+    for bone in ob.pose.bones.data.bones:
+        bone.rotation_mode = 'QUATERNION'
 
     bpy.ops.object.mode_set(mode='POSE')
 
@@ -149,11 +149,14 @@ def load_seanim(self, context, progress, filepath=""):
     scene.frame_start = 0
     scene.frame_end = scene.frame_start + anim.header.frameCount - 1
 
-    # Import the actual keyframes
-    progress.enter_substeps(anim.header.boneCount)
+    if progress:
+        progress.enter_substeps(anim.header.boneCount)
 
     missing_bones = []
+    # Import the actual keyframes
     for i, tag in enumerate(anim.bones):
+        if tag.name == 'Root' and botw_fix:
+            tag.rotate_anim(Euler((pi/2, 0, 0)))
         if tag.name not in ob.pose.bones:
             if tag.name == "Root":
                 # Special case, since the root bone can just be at the object origin, let's just create it.
@@ -166,12 +169,14 @@ def load_seanim(self, context, progress, filepath=""):
                 bpy.ops.object.mode_set(mode='POSE')
             missing_bones.append(tag.name)
     if missing_bones:
-        self.report({'ERROR'}, f"Missing {len(missing_bones)} bones. See console for full list.")
+        if operator:
+            operator.report({'ERROR'}, f"Missing {len(missing_bones)} bones. See console for full list.")
         print("Missing bones:")
         for bn in missing_bones:
             print(bn)
     else:
-        self.report({'INFO'}, f"All animated bones were imported.")
+        if operator:
+            operator.report({'INFO'}, f"All animated bones were imported.")
 
     # Look up table that we use to get a given bone by name
     # without having to worry about casing
@@ -217,10 +222,10 @@ def load_seanim(self, context, progress, filepath=""):
                     fcurve.keyframe_points[0].co = Vector(
                         (-1, bone.location[axis]))
 
-                for k, key in enumerate(tag.posKeys):
+                for i, rotFrame in enumerate(tag.posKeys):
                     # Currently the conversion is only here because I never
                     # added scaling options for Blender-CoD
-                    offset = Vector(key.data) * g_scale
+                    offset = Vector(rotFrame.data) * g_scale
 
                     # Viewanims are SEANIM_TYPE_ABSOLUTE - But all children of
                     # j_gun has a SEANIM_TYPE_RELATIVE override
@@ -236,8 +241,15 @@ def load_seanim(self, context, progress, filepath=""):
 
                     # bone.keyframe_insert("location", index=-1, frame=key.frame, group=tag.name)  # nopep8
                     for axis, fcurve in enumerate(fcurves):
-                        fcurve.keyframe_points[k + 1].co = Vector((key.frame, bone.location[axis]))  # nopep8
-                        fcurve.keyframe_points[k + 1].interpolation = 'LINEAR'
+                        # sign = 1
+                        # if botw_fix and bone.name == 'Root':
+                        #     if axis == 2:
+                        #         axis = 1
+                        #     elif axis == 1:
+                        #         sign = -1
+                        #         axis = 2
+                        fcurve.keyframe_points[i + 1].co = Vector((rotFrame.frame, bone.location[axis]))  # nopep8
+                        fcurve.keyframe_points[i + 1].interpolation = 'LINEAR'
 
                 # Update the FCurves
                 for fc in fcurves:
@@ -257,10 +269,8 @@ def load_seanim(self, context, progress, filepath=""):
                     fcurve.keyframe_points[0].co = Vector(
                         (-1, [1, 0, 0, 0][axis]))  # Add the control keyframe
 
-                for k, key in enumerate(tag.rotKeys):
-                    # Convert the Quaternion to WXYZ
-                    quat = Quaternion(
-                        (key.data[3], key.data[0], key.data[1], key.data[2]))
+                for i, rotFrame in enumerate(tag.rotKeys):
+                    quat = Quaternion((rotFrame.data))
                     angle = quat.to_matrix().to_3x3()
 
                     bone.matrix_basis.identity()
@@ -275,10 +285,13 @@ def load_seanim(self, context, progress, filepath=""):
                     bone.matrix = mat
 
                     quat = bone.rotation_quaternion
+                    # if botw_fix and bone.name == 'Skl_Root':
+                    #     quat = quat.copy()
+                    #     quat.rotate(Euler((pi/2, 0, 0)))
                     for axis, fcurve in enumerate(fcurves):
                         # bone.rotation_quaternion[axis]
-                        fcurve.keyframe_points[k + 1].co = Vector((key.frame, quat[axis]))  # nopep8
-                        fcurve.keyframe_points[k + 1].interpolation = 'LINEAR'
+                        fcurve.keyframe_points[i + 1].co = Vector((rotFrame.frame, quat[axis]))  # nopep8
+                        fcurve.keyframe_points[i + 1].interpolation = 'LINEAR'
 
                 # Update the FCurves
                 for fc in fcurves:
@@ -298,13 +311,13 @@ def load_seanim(self, context, progress, filepath=""):
                     fcurve.keyframe_points[0].co = Vector(
                         (-1, bone.scale[axis]))  # Add the control keyframe
 
-                for k, key in enumerate(tag.scaleKeys):
-                    scale = Vector(key.data)
+                for i, rotFrame in enumerate(tag.scaleKeys):
+                    scale = Vector(rotFrame.data)
 
                     for axis, fcurve in enumerate(fcurves):
                         fcurve.keyframe_points[
-                            k + 1].co = Vector((key.frame, scale[axis]))
-                        fcurve.keyframe_points[k + 1].interpolation = 'LINEAR'
+                            i + 1].co = Vector((rotFrame.frame, scale[axis]))
+                        fcurve.keyframe_points[i + 1].interpolation = 'LINEAR'
 
                 # Update the FCurves
                 for fc in fcurves:
@@ -321,8 +334,11 @@ def load_seanim(self, context, progress, filepath=""):
             # Remove any leftover temporary transformations for this bone
             bone.matrix_basis.identity()
 
-        progress.step()
-    progress.leave_substeps()
+        if progress:
+            progress.step()
+
+    if progress:
+        progress.leave_substeps()
 
     if not action.fcurves:
         print("No fcurves, deleting: ", action.name)
@@ -337,3 +353,5 @@ def load_seanim(self, context, progress, filepath=""):
 
     context.evaluated_depsgraph_get().update()
     bpy.ops.object.mode_set(mode='POSE')
+
+    return action

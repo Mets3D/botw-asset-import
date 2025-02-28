@@ -1,5 +1,7 @@
+import bpy
 from bpy.types import AddonPreferences
 from bpy.props import StringProperty
+from . import __package__ as base_package
 
 class BotWImportPreferences(AddonPreferences):
     bl_idname = __package__
@@ -28,5 +30,14 @@ class BotWImportPreferences(AddonPreferences):
         layout.prop(self, 'game_models_folder')
         layout.prop(self, 'game_icons_folder')
         layout.prop(self, 'game_anims_folder')
+
+def get_addon_prefs(context=None):
+    if not context:
+        context = bpy.context
+    if base_package.startswith('bl_ext'):
+        # 4.2
+        return context.preferences.addons[base_package].preferences
+    else:
+        return context.preferences.addons[base_package.split(".")[0]].preferences
 
 registry = [BotWImportPreferences]

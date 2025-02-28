@@ -1,5 +1,7 @@
 import time
 import struct
+from mathutils import Euler, Quaternion, Matrix
+import math
 
 try:
     # Try to import the Python 3.x enum module
@@ -237,6 +239,33 @@ class Bone(object):
         if file is not None:
             self.load(file)
 
+    @property
+    def key_count(self):
+        return max(len(self.posKeys), len(self.rotKeys), len(self.scaleKeys))
+
+    def get_matrix(self, frame: int):
+        max_frame = max(len(self.posKeys), len(self.rotKeys), len(self.scaleKeys))
+        if frame > max_frame:
+            frame = max_frame
+
+        loc = self.posKeys[frame].data
+        rot = self.rotKeys[frame].data
+        rot = Quaternion((rot[0], rot[1], rot[2], rot[3]))
+        scale = self.scaleKeys[frame].data
+
+        return Matrix.LocRotScale(loc, rot, scale)
+
+    def rotate_anim(self, euler):
+        # Rotate the animation of this bone, as if there was a parent bone that was rotated by this amount.
+        # Necessary for BotW root bones, as they for some reason get imported 90 degrees off, at least in most cases.
+        for i in range(self.key_count):
+            mat = self.get_matrix(i)
+            rotation_matrix = Euler(euler, 'XYZ').to_matrix().to_4x4()
+            mat = rotation_matrix @ mat
+            self.posKeys[i].data = mat.to_translation()
+            self.rotKeys[i].data = mat.to_quaternion()
+            self.scaleKeys[i].data = mat.to_scale()
+
     def load(self, file):
         bytes = b''
         b = file.read(1)
@@ -281,8 +310,8 @@ class Bone(object):
                                      (frame_t.char, precision_t.char), bytes)
 
                 frame = data[0]
-                # Load the quaternion as XYZW
-                quat = (data[1], data[2], data[3], data[4])
+                # Load the quaternion as WXYZ
+                quat = (data[4], data[1], data[2], data[3])
 
                 self.rotKeys.append(KeyFrame(frame, quat))
 

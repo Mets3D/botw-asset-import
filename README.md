@@ -42,7 +42,8 @@ These are:
 - Merge Actions (bpy.ops.asset.merge_actions): With any number of actions selected in the Asset Browser or the outliner, this operator merges them into one. In case of conflicts (two actions have an f-curve with the same data path), the active action will win, otherwise priority is random. So it's safest to merge two actions at a time. This is useful for things like Link, where he sometimes has unique animations split up into separate head/body actions when imported.
 - Merge Armatures (bpy.ops.object.botw_merge_armatures): With any number of armatures selected, combine them while removing duplicate bones and preserving parenting relationships between objects and bones, as well as preserving Armature modifiers. Useful for combining clothes and characters.
 - Focus Asset (bpy.ops.asset.focus_asset): Supports Collection and Action assets. When a Collection asset is selected, this will isolate that collection, and frame the viewport to its objects. With an Action, it will only work when there is an active armature object, and it will assign the action, set the scene's frame range, and focus the camera on the rig's visible child objects. Handy in combination with the next operator, especially if you use Blender's "Lock Camera to View" option.
-- Thumbnail From Viewport (bpy.ops.asset.thumbnail_from_viewport): Makes a viewport snapshot and assigns it as the thumbnail of the active asset. This uses the scene's resolution, so you should set it to a square of 256x256 or smaller. Overlays will be disabled, but it's up to you to enter rendered view if you want to.
+- Thumbnail From Viewport (bpy.ops.asset.thumbnail_from_viewport): Makes a viewport snapshot and assigns it as the thumbnail of the active asset. Overlays will be disabled, but it's up to you to enter rendered view if you want to. Transparent pixels will be cropped, and the resolution is capped at 256 (by scaling it down if needed) which is Blender's hard limit for asset thumbnails.
+- Crop Asset Thumbnails (bpy.ops.asset.crop_asset_thumbnails): Crops transparent pixels out of the selected assets' thumbnails.
 - BotW: Auto-import .seanim: Loops over all visible armatures in the scene, and import all matching animations found in the directory specified in the add-on preferences.
 
 ### .seanim importer
@@ -50,6 +51,7 @@ The add-on also includes a modified version of the .seanim importer by [SE2DEV](
 - Clean up unnecessary keyframes, to shrink the amount of data stored on disk by about half, in the case of these baked game animations.
 - Create a root bone on import as this is for some reason not imported with the .fbx files (the object is considered the root, which is dumb).
 - Change the animation of the root bone by 90 degrees on X. It's unclear to me if this is related to the previous issue, but creating the root bone with different rotation doesn't matter. It just imports with a constant 90 degree offset on the root bone.
+- If any scaling is applied on any animation of the armature being imported on, the children of that bone will have scale inheritance disabled. This results in correct looking animations. An example of this is animals breathing, where the upper spine bone would be scaled, which obviously shouldn't propagate to the head or front legs.
 
 ### How the automatic shader set-up works
 

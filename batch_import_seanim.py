@@ -1,4 +1,5 @@
 import bpy, os
+from bpy.props import EnumProperty
 from .prefs import get_addon_prefs
 from .io_anim_seanim.import_seanim import load_seanim
 
@@ -8,9 +9,20 @@ class SCENE_OT_import_batch_seanim(bpy.types.Operator):
     bl_label = "Auto-Import .seanim for all assets"
     bl_options = {'REGISTER', 'UNDO'}
 
+    import_mode: EnumProperty(
+        name="Import Mode",
+        items=[
+            ('SELECTED', 'Selected', 'Auto-import animations of selected armatures'),
+            ('ALL', 'All', 'Auto-import animations of all visible armatures'),
+        ])
+
+    def invoke(self, context, _event):
+        return context.window_manager.invoke_props_dialog(self)
+
     def execute(self, context):
         anim_folder = get_addon_prefs(context).game_anims_folder
-        for rig in [r for r in context.scene.objects if r.type=='ARMATURE']:
+        objs = context.scene.objects if self.import_mode=='ALL' else context.selected_objects
+        for rig in [r for r in objs if r.type=='ARMATURE']:
             asset_name = ""
             for child in rig.children_recursive:
                 if 'dirname' in child:

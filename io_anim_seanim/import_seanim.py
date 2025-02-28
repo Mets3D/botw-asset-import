@@ -142,6 +142,8 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
     action = bpy.data.actions.new(actionName)
     action.use_fake_user = True
     action['file_size_kb'] = round(os.path.getsize(filepath) / 1024, 2)
+    action['filepath'] = filepath
+    action['filename'] = actionName
     ob.animation_data.action = action
 
     scene = context.scene
@@ -186,6 +188,8 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
         if name in bone_map:
             print("Warning: Bone name conflict for '%s'\n" % name)
         bone_map[bone.name.lower()] = bone
+
+    bones_with_animated_scale = set()
 
     for i, tag in enumerate(anim.bones):
         try:
@@ -241,13 +245,6 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
 
                     # bone.keyframe_insert("location", index=-1, frame=key.frame, group=tag.name)  # nopep8
                     for axis, fcurve in enumerate(fcurves):
-                        # sign = 1
-                        # if botw_fix and bone.name == 'Root':
-                        #     if axis == 2:
-                        #         axis = 1
-                        #     elif axis == 1:
-                        #         sign = -1
-                        #         axis = 2
                         fcurve.keyframe_points[i + 1].co = Vector((rotFrame.frame, bone.location[axis]))  # nopep8
                         fcurve.keyframe_points[i + 1].interpolation = 'LINEAR'
 
@@ -285,9 +282,6 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
                     bone.matrix = mat
 
                     quat = bone.rotation_quaternion
-                    # if botw_fix and bone.name == 'Skl_Root':
-                    #     quat = quat.copy()
-                    #     quat.rotate(Euler((pi/2, 0, 0)))
                     for axis, fcurve in enumerate(fcurves):
                         # bone.rotation_quaternion[axis]
                         fcurve.keyframe_points[i + 1].co = Vector((rotFrame.frame, quat[axis]))  # nopep8
@@ -315,6 +309,8 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
                     scale = Vector(rotFrame.data)
 
                     for axis, fcurve in enumerate(fcurves):
+                        if botw_fix and scale[axis] != 1.0:
+                            bones_with_animated_scale.add(bone)
                         fcurve.keyframe_points[
                             i + 1].co = Vector((rotFrame.frame, scale[axis]))
                         fcurve.keyframe_points[i + 1].interpolation = 'LINEAR'
@@ -336,6 +332,10 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
 
         if progress:
             progress.step()
+
+    for bone in bones_with_animated_scale:
+        for child in bone.children:
+            child.bone.inherit_scale = 'NONE'
 
     if progress:
         progress.leave_substeps()

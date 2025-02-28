@@ -15,7 +15,7 @@ class ASSETBROWSER_OT_focus_asset(bpy.types.Operator):
 
     @staticmethod
     def guess_user_intent(context):
-        if not hasattr(context, 'selected_ids'):
+        if not hasattr(context, 'id'):
             return ''
         active_action = context.id and type(context.id) == bpy.types.Action
         active_armature = context.active_object and context.active_object.type == 'ARMATURE'

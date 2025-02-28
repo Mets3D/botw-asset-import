@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import bpy
 from bpy.utils import register_class, unregister_class
 import importlib
 
@@ -18,6 +19,7 @@ module_names = (
     "op_armature_merge",
     "op_actions_merge",
     "io_anim_seanim",
+    "batch_import_seanim",
 )
 
 
@@ -26,6 +28,14 @@ modules = [
     for submod in module_names
 ]
 
+def get_addon_prefs(context=None):
+    if not context:
+        context = bpy.context
+    if __package__.startswith('bl_ext'):
+        # 4.2
+        return context.preferences.addons[__package__].preferences
+    else:
+        return context.preferences.addons[__package__.split(".")[0]].preferences
 
 def register_unregister_modules(modules: list, register: bool):
     """Recursively register or unregister modules by looking for either

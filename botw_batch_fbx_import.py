@@ -10,6 +10,7 @@ from .asset_names import asset_names
 from .collections import ensure_collection, set_active_collection
 from .widgets import ensure_widget, get_resources_blend_path
 from . import __package__ as base_package
+from . import get_addon_prefs
 
 PRINT_LATER = []
 
@@ -78,15 +79,6 @@ PRIMITIVE_NAMES = ["_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone",
 
 def print_later(*msg):
     PRINT_LATER.append("".join(msg))
-
-def get_addon_prefs(context=None):
-    if not context:
-        context = bpy.context
-    if base_package.startswith('bl_ext'):
-        # 4.2
-        return context.preferences.addons[base_package].preferences
-    else:
-        return context.preferences.addons[base_package.split(".")[0]].preferences
 
 def camel_to_spaces(str):
     return re.sub(r'(?<!^)(?=[A-Z])', ' ', str)

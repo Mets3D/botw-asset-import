@@ -14,6 +14,11 @@ class BotWImportPreferences(AddonPreferences):
         subtype='FILE_PATH',
         description="If the path to the Ancient Arrow's inventory icon is this:\nD:\\BotW Extracted\\Icons\\AncientArrow\\AncientArrow.jpg\nThen in this box you should browse this:\nD:\\BotW Extracted\\Icons\\"
     )
+    game_anims_folder: StringProperty(
+        name="Animations Folder",
+        subtype='FILE_PATH',
+        description="If the path to the Bear's Eat animation is this:\nD:\\BotW Extracted\\Animations\\Animal_Bear_Animation\\Eat.seanim\nThen in this box you should browse this:\nD:\\BotW Extracted\\Animations\\"
+    )
 
     def draw(self, context):
         layout = self.layout
@@ -22,5 +27,6 @@ class BotWImportPreferences(AddonPreferences):
 
         layout.prop(self, 'game_models_folder')
         layout.prop(self, 'game_icons_folder')
+        layout.prop(self, 'game_anims_folder')
 
 registry = [BotWImportPreferences]

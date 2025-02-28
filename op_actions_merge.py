@@ -71,3 +71,13 @@ def merge_actions(destination: bpy.types.Action, others: list[bpy.types.Action])
     return destination
 
 registry = [ASSET_OT_merge_actions]
+
+def draw_merge_actions(self, context):
+    if context.id and type(context.id) == bpy.types.Action:
+        self.layout.operator(ASSET_OT_merge_actions.bl_idname)
+
+def register():
+    bpy.types.ASSETBROWSER_MT_asset.append(draw_merge_actions)
+
+def unregister():
+    bpy.types.ASSETBROWSER_MT_asset.remove(draw_merge_actions)

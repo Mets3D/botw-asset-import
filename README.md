@@ -10,7 +10,7 @@ Install like any other add-on that isn't on the Extension Platform:
 - Little arrow on the top-right->Install From Disk...->Browse the .zip
 - Enable the add-on.
 
-- Follow the instruction on the "Textures/Icons Folder" inputs' tooltips to browse the correct folders. They are extremely specific.
+- Follow the instruction on the "Textures/Icons/Animations Folder" inputs' tooltips (that appear on mouse hover) to browse the correct folders.
 
 ### How to use
 - The add-on is meant to be used after a tool like Switch Toolbox has extracted the game's models, textures, and inventory icons into .dae+.fbx, .png, and .jpg formats respectively. You need to browse the folder with the textures in the user preferences, as already mentioned. This is necessary because plenty of assets don't have the textures in their own folders, so the importer will always check in the specified folder instead of next to the .dae/.fbx files.
@@ -29,6 +29,7 @@ Install like any other add-on that isn't on the Extension Platform:
 - Sets up assets with in-game inventory icons when possible. Some extra requirements for this are:
     - Use Switch Toolbox to extract the game's "content\UI\StockItem" folder. Make sure to switch the export format to .jpg, and to leave the "Create folders" option enabled.
     - In the add-on's preferences, browse the resulting folder of folders of .jpg files (yes, I typed that correctly) in the "Icons Folder" option.
+- Adds some handy operators and a tweaked .seanim importer, see below.
 
 ### What it doesn't do
 - Not every material setting can be guessed correctly by the importer, since it's working with very little data. Check the shader node that the textures are plugged into, and notice it has a "Settings" section. These may need manual tweaking, eg. for setting the Emission Color.
@@ -38,13 +39,19 @@ Install like any other add-on that isn't on the Extension Platform:
 ### Operators
 Also included is a number of handy operators for the asset browser. These may be split out into a separate add-on in the future, which I'll try to remember to mention here if it ever happens.
 These are:
-- bpy.ops.asset.merge_actions: Select any number of actions in the Asset Browser or the Outliner. Run this operator to merge these actions into one. In the case of conflicts (both actions have an f-curve with a given data path), the active action will win, otherwise priority is random. (best to only merge two actions at a time). This is useful for things like Link, where he sometimes has unique animations split up into separate head/body actions when imported.
-- 
+- Merge Actions (bpy.ops.asset.merge_actions): With any number of actions selected in the Asset Browser or the outliner, this operator merges them into one. In case of conflicts (two actions have an f-curve with the same data path), the active action will win, otherwise priority is random. So it's safest to merge two actions at a time. This is useful for things like Link, where he sometimes has unique animations split up into separate head/body actions when imported.
+- Merge Armatures (bpy.ops.object.botw_merge_armatures): With any number of armatures selected, combine them while removing duplicate bones and preserving parenting relationships between objects and bones, as well as preserving Armature modifiers. Useful for combining clothes and characters.
+- Focus Asset (bpy.ops.asset.focus_asset): Supports Collection and Action assets. When a Collection asset is selected, this will isolate that collection, and frame the viewport to its objects. With an Action, it will only work when there is an active armature object, and it will assign the action, set the scene's frame range, and focus the camera on the rig's visible child objects. Handy in combination with the next operator, especially if you use Blender's "Lock Camera to View" option.
+- Thumbnail From Viewport (bpy.ops.asset.thumbnail_from_viewport): Makes a viewport snapshot and assigns it as the thumbnail of the active asset. This uses the scene's resolution, so you should set it to a square of 256x256 or smaller. Overlays will be disabled, but it's up to you to enter rendered view if you want to.
+- BotW: Auto-import .seanim: Loops over all visible armatures in the scene, and import all matching animations found in the directory specified in the add-on preferences.
 
 ### .seanim importer
-The add-on also includes a modified version of the .seanim importer by [SE2DEV](https://github.com/SE2Dev). This version will clean up unnecessary keyframes, to shrink the amount of data stored on disk by about half, in the case of these baked game animations, as well as change the axes on some root bone animations because for some reason they normally import sort of 90 degrees off.
+The add-on also includes a modified version of the .seanim importer by [SE2DEV](https://github.com/SE2Dev). The following modifications were made:
+- Clean up unnecessary keyframes, to shrink the amount of data stored on disk by about half, in the case of these baked game animations.
+- Create a root bone on import as this is for some reason not imported with the .fbx files (the object is considered the root, which is dumb).
+- Change the animation of the root bone by 90 degrees on X. It's unclear to me if this is related to the previous issue, but creating the root bone with different rotation doesn't matter. It just imports with a constant 90 degree offset on the root bone.
 
-### How it works
+### How the automatic shader set-up works
 
 This section is for the technically curious. How does the add-on get so much material data? The answer is "mostly guessing".
 

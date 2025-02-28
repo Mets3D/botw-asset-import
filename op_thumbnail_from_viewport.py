@@ -1,10 +1,10 @@
 import bpy, os
 
-class ASSETBROWSER_OT_viewport_render_asset_thumbnail(bpy.types.Operator):
+class ASSET_OT_thumbnail_from_viewport(bpy.types.Operator):
     """Create an asset preview from a viewport render."""
 
     bl_idname = "asset.thumbnail_from_viewport"
-    bl_label = "Viewport Render Asset Thumbnail"
+    bl_label = "Thumbnail From Viewport"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -39,9 +39,9 @@ class ASSETBROWSER_OT_viewport_render_asset_thumbnail(bpy.types.Operator):
         return {'FINISHED'}
 
 def draw_menu(self, context):
-    self.layout.operator(ASSETBROWSER_OT_viewport_render_asset_thumbnail.bl_idname)
+    self.layout.operator(ASSET_OT_thumbnail_from_viewport.bl_idname)
 
-registry = [ASSETBROWSER_OT_viewport_render_asset_thumbnail]
+registry = [ASSET_OT_thumbnail_from_viewport]
 
 def register():
     bpy.types.ASSETBROWSER_MT_metadata_preview_menu.append(draw_menu)

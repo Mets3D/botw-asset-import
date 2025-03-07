@@ -80,4 +80,8 @@ def register():
     bpy.types.ASSETBROWSER_MT_asset.append(draw_merge_actions)
 
 def unregister():
-    bpy.types.ASSETBROWSER_MT_asset.remove(draw_merge_actions)
+    try:
+        bpy.types.ASSETBROWSER_MT_asset.remove(draw_merge_actions)
+    except Exception:
+        # Looks like Blender unregisters this class before the add-on?
+        pass

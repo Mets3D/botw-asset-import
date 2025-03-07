@@ -5,7 +5,7 @@ from bpy.types import Collection, LayerCollection
 # TODO: support objects!
 
 class ASSETBROWSER_OT_focus_asset(bpy.types.Operator):
-    """Bring this asset into focus (Supports Collections, Actions)."""
+    """Bring this asset into focus. Supports these asset types:\nCollections (local only)\nActions (local & external)"""
 
     bl_idname = "asset.focus_asset"
     bl_label = "Focus Asset"
@@ -26,14 +26,24 @@ class ASSETBROWSER_OT_focus_asset(bpy.types.Operator):
         if collections:
             focus_collections(context, collections, self.focus_view, self)
             self.report({'INFO'}, f"Focused {len([collections])} collection(s)")
-            
-        actions = [id for id in context.selected_ids if type(id)==bpy.types.Action]
-        if actions:
-            for action in actions:
-                focus_action(context, action, self.focus_view)
-            self.report({'INFO'}, f"Focus Action: {context.id.name}")
 
-        if collections or actions:
+        action = None
+        if type(context.id) == bpy.types.Action:
+            action = context.id
+        elif context.asset and hasattr(context.asset, 'id_type') and context.asset.id_type == 'ACTION':
+            import_method = context.area.spaces.active.params.import_method
+            if import_method == 'FOLLOW_PREFS':
+                import_method = context.preferences.filepaths.asset_library_import_method
+            link = import_method == 'LINK'
+            action = get_or_import_action(context.asset.name, context.asset.full_library_path, link=link)
+
+        if action:
+            focus_action(context, action, self.focus_view)
+            self.report({'INFO'}, f"Focus Action: {context.asset.name}")
+
+        # bpy.ops.file.view_selected()
+
+        if collections or action:
             return {'FINISHED'}
         else:
             self.report({'ERROR'}, "Nothing to focus.")
@@ -42,10 +52,11 @@ class ASSETBROWSER_OT_focus_asset(bpy.types.Operator):
 def guess_asset_type(context):
     if not hasattr(context, 'id'):
         return ''
-    active_action = context.id and type(context.id) == bpy.types.Action
-    active_armature = context.active_object and context.active_object.type == 'ARMATURE'
-    if active_action and active_armature:
-        return 'ACTION'
+    active_asset = context.id or context.asset
+    if type(active_asset) == bpy.types.Action or (hasattr(active_asset, 'id_type') and active_asset.id_type == 'ACTION'):
+        active_armature = context.active_object and context.active_object.type == 'ARMATURE'
+        if active_armature:
+            return 'ACTION'
     any_colls =  any([type(id) == bpy.types.Collection for id in context.selected_ids])
     if any_colls:
         return 'COLLECTION'
@@ -69,7 +80,11 @@ def focus_action(context, action, focus_view=True):
         for obj in org_selected:
             obj.select_set(False)
         for obj in rig.children_recursive:
-            obj.select_set(True)
+            try:
+                obj.select_set(True)
+            except RuntimeError:
+                # If the object cannot be selected for any reason, whatever, it's not that important.
+                pass
         focus_selected_objects(context)
         # Restore selection
         for obj in rig.children_recursive:
@@ -78,6 +93,16 @@ def focus_action(context, action, focus_view=True):
             obj.select_set(True)
 
     return {'FINISHED'}
+
+def get_or_import_action(action_name, library_path, link=False):
+    if action_name in bpy.data.actions:
+        return bpy.data.actions[action_name]
+
+    with bpy.data.libraries.load(library_path, relative=True, link=link) as (data_from, data_to):
+        if action_name in data_from.actions:
+            data_to.actions.append(action_name)
+
+    return bpy.data.actions.get(action_name)
 
 def focus_collections(context, collections, focus_view=True, operator=None):
     if not collections:
@@ -111,7 +136,7 @@ def focus_collections(context, collections, focus_view=True, operator=None):
     return {'FINISHED'}
 
 def focus_selected_objects(context):
-    org_mode = context.active_object.mode
+    org_mode = context.active_object.mode if context.active_object else 'OBJECT'
     if org_mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
     area = next(a for a in context.screen.areas if a.type == 'VIEW_3D')

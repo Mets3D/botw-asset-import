@@ -193,7 +193,7 @@ asset_names = {
     "Armor_008_Head": "Desert Voe Headband",
     "Armor_008_Lower": "Desert Voe Trousers",
     "Armor_008_Upper": "Desert Voe Spaulder",
-    "Armor_009": "Snoquill Set",
+    "Armor_009": "Snowquill Set",
     "Armor_009_Head": "Snowquill Headdress",
     "Armor_009_Lower": "Snowquill Trousers",
     "Armor_009_Upper": "Snowquill Tunic",

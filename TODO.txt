@@ -2,11 +2,6 @@
 TODO:
     Load material data on existing objects to whatever extent possible
         Detect and inspect discrepancies (maybe I can't be arsed tbh)
-    Load material data on import when available (otherwise use current logic)
-        This might be worthwhile if we can get the UV pingpong nodes set up, get the emission color, and the UV channel, and the alpha blend mode.
-        But re-implementing stuff like Blade_Fx textures and .clrmak and all kinds of rare cases would be annoying...
-    Finish material export feature in Switch Toolbox.
-        Convert strings to integers where possible, if it's easy enough. (don't re-export the whole game, I can convert in Blender if I need to.)
     Motorcycle animation
     Friendly NPCs animation
     finish TwnObj (there's so much hyrule castle to do and it feels kinda pointless without map data...)

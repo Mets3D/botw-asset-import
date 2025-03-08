@@ -17,6 +17,8 @@ TODO:
     consider the DgnMrgPrt and MergedGrudge stuff but probably ignore them.
 
 Things to do with final cleanup script or manual:
+    Crop asset thumbnails with the operator.
+    Could check for cases where a material uses an incomplete textureset (not as many of Alb, Spm, Nrm are used as exist)
     Make UILayout consistent across all files, or at least files of the same type.
         Default workspaces
         Material Preview without overlays + solid view with overlays?
@@ -33,6 +35,7 @@ Things to do with final cleanup script or manual:
     Rename obdatas to obname
     Make sure any object that has "Inside_Mat" in the name is very very disabled and hidden, and maybe even has no material or assign an Invisible material.
     Rename materials to the albedo name with _Alb ending (if there is an albedo texture ofc), and numbering if necessary.
+        Materials using an SPM UV node but on objects whose meshes don't have an SPM UVMap need to insert a UV Fallback node.
         Remove unnecessary (dot) .001 material name endings.
         Remove any (underscore) "_###" regex match from material names.
         Replace "D L C  " with "DLC"

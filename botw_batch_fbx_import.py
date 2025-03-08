@@ -22,7 +22,7 @@ TEXTURE_EXTENSION = ".png"
 
 DYES = ["Default", "Blue", "Red", "Yellow", "White", "Black", "Purple", "Green", "Light Blue", "Navy", "Orange", "Peach", "Crimson", "Light Yellow", "Brown", "Gray"]
 
-OBJ_PREFIXES = ["Obj_", "TwnObj_", "FldObj_", "DgnObj_", "DgnMrgPrt_"]
+OBJ_PREFIXES = ["Obj_", "TwnObj_", "TwnObjVillage_", "FldObj_", "DgnObj_", "DgnMrgPrt_"]
 PRIMITIVE_NAMES = ["_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane", "pSolid"]
 
 
@@ -103,7 +103,8 @@ def derive_asset_name(dae_filename: str, dirname: str, is_single_file: bool) -> 
     if asset_name == without_ext and (without_ext.endswith("_A") or without_ext.endswith("_B")):
         asset_name = asset_names.get(without_ext[:-2], without_ext[:-2])
 
-    # If an asset directory only has one .dae file and its name wasn't in the asset dictionary, try the dictionary's name instead.
+    # If an asset directory only has one .dae file and its name wasn't in the asset dictionary, 
+    # try the directory's name instead.
     if asset_name == without_ext and is_single_file:
         asset_name = asset_names.get(dirname, asset_name)
 
@@ -119,7 +120,8 @@ def derive_asset_name(dae_filename: str, dirname: str, is_single_file: bool) -> 
     if asset_name == without_ext and "Enemy" in asset_name:
         asset_name = asset_names.get(asset_name.replace("Enemy_", ""), asset_name)
 
-    # Most "Obj_" prefix meshes won't be in the dictionary, since they don't have any in-game strings that are exposed to the player. (non-cel shaded environment meshes)
+    # Most "Obj_" prefix meshes won't be in the dictionary, since they don't have any in-game strings 
+    # that are exposed to the player. (non-cel shaded environment meshes)
     # So to avoid having to add all of these to the dictionary, just do some string operations.
     for prefix in OBJ_PREFIXES:
         if asset_name.startswith(prefix):
@@ -213,6 +215,10 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
 
     # Create the collection and set it as active so all the objects get imported there to begin with.
     collection = ensure_collection(context, asset_name, parent=parent_coll)
+    collection.asset_mark()
+    collection['dirname'] = dirname
+    collection['asset_name'] = asset_name
+    collection['file_name'] = filename.replace(".dae", "")
     set_active_collection(context, collection)
 
     objs = import_dae(context, filepath, discard_types=('EMPTY'))
@@ -220,15 +226,9 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
     if not objs:
         return
 
-    prefs = get_addon_prefs(context)
-
-    collection.asset_mark()
-    collection['dirname'] = dirname
-    collection['asset_name'] = asset_name
-    collection['file_name'] = filename.replace(".dae", "")
-
     # Try to load an in-game icon for this asset, 
     # if user has specified an icon dirpath in the add-on preferences.
+    prefs = get_addon_prefs(context)
     if prefs.game_icons_folder:
         override = context.copy()
         override["id"] = collection
@@ -286,27 +286,9 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
                 else:
                     print_later("json file not found: ", json_filepath)
 
-            # Fix rotations.
-            if ("UMii" in collection['dirname'] and 'hair' in collection['dirname'].lower()) or 'Backpack' in asset_name:
-                # Generic NPC hair objects are weirdly transformed...
-                obj.rotation_euler.y -= pi/2
-                obj.rotation_euler.z -= pi/2
-                if obj.parent:
-                    obj.location.x = -obj.parent.location.z
-                obj.location.z = 0
-            else:
-                obj.rotation_euler = (0, 0, 0)
-                for prefix in OBJ_PREFIXES:
-                    if collection['dirname'].startswith(prefix):
-                        obj.rotation_euler = (pi/2, 0, 0)
-
             cleanup_mesh(collection, obj, asset_name, image_map)
 
         obj.data.name = obj.name
-
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-    # for obj, offset in offsets:
-    #     obj.location.x += offset
 
 def import_and_merge_fbx_data(context, *, dae_objs, dae_path, asset_name):
     """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
@@ -382,6 +364,8 @@ def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = (
     bpy.ops.object.select_all(action='DESELECT')
     # Can't seem to suppress prints on collada, hmm.
     import_func(filepath=filepath)
+    bpy.ops.transform.translate()
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     for ob in context.selected_objects[:]:
         if ob.type in discard_types:
             bpy.data.objects.remove(ob)
@@ -457,6 +441,7 @@ def setup_material(collection, obj, material, image_map):
 
     socket_map = load_assigned_textures(material, image_map)
     assigned_textures = [img for img in list(socket_map.keys())]
+    material['assigned_textures'] = str(assigned_textures)
     shader_name, guessed_textures = guess_shader_and_textures(collection, obj, material, socket_map, image_map)
     shader_node = init_nodetree(material, shader_name)
 
@@ -468,6 +453,7 @@ def setup_material(collection, obj, material, image_map):
     set_shader_socket_values(collection, obj, material, shader_node, spm_has_green)
 
 def load_assigned_textures(material, image_map) -> OrderedDict:
+    missing_textures = []
     assigned_textures = []
     if 'shader_data' in material:
         shader_data = json.loads(material['shader_data'])
@@ -475,33 +461,44 @@ def load_assigned_textures(material, image_map) -> OrderedDict:
         for tex_data in texture_maps:
             img = ensure_loaded_img(tex_data['Name'], image_map)
             if not img:
+                print_later("Missing texture: ", material.name, tex_data['Name'])
+                missing_textures.append(tex_data['Name'])
                 continue
             if any([tup[0] == tex_data['Type'] for tup in assigned_textures]):
-                # Not sure yet if this ever happens.
+                # Happens sometimes, especially with "Unknown" types (which are sometimes just regular Alb/Nrm/etc...).
                 print_later("Duplicate assigned texture: ", material.name, tex_data['Type'], tex_data['Name'])
-                continue
             type = tex_data['Type']
             if type == 'Unknown':
                 sampler = tex_data['SamplerName']
-                if sampler == '_n0':
-                    type = 'Normal'
-                elif sampler == 'a0':
+                # If the material data doesn't give us the texture type, we have some fallbacks to guess.
+                if '_Alb' in img.name:
                     type = 'Diffuse'
-                elif sampler == '_e0':
-                    type = 'Emission'
-                elif sampler == '_ao0':
-                    type = 'AO'
-                elif sampler == '_s0':
+                elif '_Spm' in img.name:
                     type = 'Specular'
-                elif sampler == '_mt0':
+                elif '_Nrm' in img.name:
+                    type = 'Normal'
+                elif sampler in ('_n0', 'n0', '_n1', 'n1'):
+                    type = 'Normal'
+                elif sampler in ('_a0', 'a0', '_a1', 'a1'):
+                    type = 'Diffuse'
+                elif sampler in ('_e0', 'e0', '_e1', 'e1'):
+                    type = 'Emission'
+                elif sampler in ('_ao0', 'ao0', '_ao1', 'ao1'):
+                    type = 'AO'
+                elif sampler in ('_s0', 's0', '_s1', 's1'):
+                    type = 'Specular'
+                elif sampler in ('_mt0', 'mt0', '_mt1', 'mt1'):
                     type = 'Metallic'
-                elif sampler in ('_a1', '_gn0'):
+                elif sampler in ('_gn0'):
                     # These sampler names have proved unreliable for determining texture type.
                     pass
                 else:
                     # There may be other useful sampler names for determining texture type.
                     pass
             assigned_textures.append((type, img))
+
+    if missing_textures:
+        material['missing_textures'] = str(missing_textures)
 
     socket_map = OrderedDict()
     for type, img in assigned_textures:
@@ -940,7 +937,15 @@ def hookup_rgb_nodes(material, shader_node):
         # If there's at least one proper color constant, 
         # there's a very solid chance for it to be emmission color.
         if 'Emission Color' in shader_node.inputs:
-            links.new(color_nodes[0].outputs[0], shader_node.inputs['Emission Color'])
+            is_albedo = False
+            if 'Albedo' in shader_node.inputs:
+                albedo_socket = shader_node.inputs['Albedo']
+                if len(albedo_socket.links) == 0:
+                    links.new(color_nodes[0].outputs[0], albedo_socket)
+                    is_albedo = True
+            if not is_albedo:
+                links.new(color_nodes[0].outputs[0], shader_node.inputs['Emission Color'])
+                set_socket_value(shader_node, "Emission Strength", 0.1)
 
 def get_color_values(material) -> list[Vector]:
     colors = []
@@ -1014,7 +1019,7 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
             if shader_node.inputs['Emission Mask'].links:
                 links.remove(shader_node.inputs['Emission Mask'].links[0])
     if 'Hylian Hair' in collection['asset_name'] or 'Hylian Child Hair' in collection['asset_name']:
-        set_socket_value(shader_node, 'Albedo', [0.039014, 0.028126, 0.006496, 1.000000])
+        set_socket_value(shader_node, 'Albedo', [0.833908, 0.530669, 0.151620, 1.000000])
     if 'Hylian Beard' in collection['asset_name']:
         set_socket_value(shader_node, 'Albedo', [0.314406, 0.314406, 0.314406, 1.000000])
     if 'Hylian Glasses' in collection['asset_name']:

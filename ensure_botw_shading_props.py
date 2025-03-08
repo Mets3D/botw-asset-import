@@ -4,14 +4,17 @@ import bpy
 # Instead, we can use Attribute shader nodes, which can then reference World custom properties, which can be driven.
 # This script needs to run once per scene that has BotW shading and lights, to create those properties and drivers.
 
+# This script can be ran if you want BotW lighting to function in a given scene, without replacing its World.
+# The necessary properties and drivers will be created on the active World.
+
 def create_world_properties():
     scene = bpy.context.scene
     sun = bpy.data.objects.get('LGT-botw-sun')
     sun_z = bpy.data.objects.get('LGT-botw-sun_z_axis')
     sphere_light = bpy.data.objects.get('LGT-botw-sphere_light')
-    if not sun and sun_z and sphere_light:
-        print("Failed to create BotW shading properties. Vital light objects may have been deleted.")
-        return
+    assert sun, "Sun object missing: LGT-botw-sun"
+    assert sun_z, "Sun Z-axis helper missing: LGT-botw-sun_z_axis"
+    assert sphere_light, "Sphere light missing: LGT-botw-sphere_light"
 
     world = scene.world
     if not world:

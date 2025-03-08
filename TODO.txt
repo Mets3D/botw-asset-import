@@ -2,6 +2,13 @@
 TODO:
     Load material data on existing objects to whatever extent possible
         Detect and inspect discrepancies (maybe I can't be arsed tbh)
+    
+    Some code in bmubin suggests that renderState tells us transparency mode:
+        "Mt_CmnTex_Etc_IbusuParts_A_01": {"renderState": "Translucent"},
+        "Mt_CmnTex_Metal_IbtEX_A_Screw_A": {"renderState": "AlphaMask"},
+        "Mt_DgnObj_IbtElectric_Fence_NetWallB_01": {"renderState": "AlphaMask"},
+        "Mt_mnTex_Etc_IbutsuPart_D": {"renderState": "Translucent"}, 
+    
     Motorcycle animation
     Friendly NPCs animation
     finish TwnObj (there's so much hyrule castle to do and it feels kinda pointless without map data...)

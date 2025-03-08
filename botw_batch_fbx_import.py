@@ -33,7 +33,7 @@ def camel_to_spaces(str):
     return re.sub(r'(?<!^)(?=[A-Z])', ' ', str)
 
 class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
-    """Import all FBX files from a selected folder recursively"""
+    """Import all .dae & .fbx files from a selected folder recursively"""
     bl_idname = "import_scene.botw_dae_fbx"
     bl_label = "Import BotW .dae + .fbx"
     bl_options = {'REGISTER', 'UNDO'}
@@ -55,10 +55,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
 
         # First we walk through the folders and make a mapping of all images from 
         # their name to their filepath in the Models directory.
-        # This has to be done in advance before importing meshes because not all meshes
-        # have the necessary textures next to them.
-        # For example, Link's hair mesh is in Armor_Default/Armor_Default.fbx,
-        # but the textures are in Link/Link_Hair_Alb.png.
+        # This has to be done in advance before importing meshes because many meshes
+        # don't have the necessary textures next to them.
         # Hopefully the user has specified a folder with an extracted Models folder in the add-on prefs, 
         # otherwise we just use the selected folder and hope for the best.
         image_map = dict()
@@ -91,9 +89,6 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             print(lateprint)
 
         bpy.ops.outliner.orphans_purge()
-        text = bpy.data.texts.get('ensure_botw_shading_props.py')
-        if text:
-            exec(text.as_string())
 
         deduplicate_materials()
         refresh_images()
@@ -228,6 +223,9 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
     prefs = get_addon_prefs(context)
 
     collection.asset_mark()
+    collection['dirname'] = dirname
+    collection['asset_name'] = asset_name
+    collection['file_name'] = filename.replace(".dae", "")
 
     # Try to load an in-game icon for this asset, 
     # if user has specified an icon dirpath in the add-on preferences.
@@ -257,7 +255,6 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
             if obj.name[-4] == ".":
                 orig_name = obj.name[:-4]
             obj['import_name'] = orig_name
-            obj['file_name'] = filename.replace(".dae", "")
             if "_Mt_" in obj.name:
                 split = obj.name.split("_Mt_")
                 obj.name = asset_name + "_" + split[0]
@@ -278,7 +275,7 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
                 if m.type == 'ARMATURE' and not m.object:
                     obj.modifiers.remove(m)
             for m in obj.data.materials:
-                json_filepath = os.path.join(json_base_path, obj['file_name'] + "_" + m['import_name'] + ".json")
+                json_filepath = os.path.join(json_base_path, collection['file_name'] + "_" + m['import_name'] + ".json")
                 if os.path.isfile(json_filepath):
                     with open(json_filepath, 'r') as json_file:
                         json_data = json.load(json_file)
@@ -289,11 +286,8 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
                 else:
                     print_later("json file not found: ", json_filepath)
 
-            obj['dirname'] = dirname
-            obj['asset_name'] = asset_name
-
             # Fix rotations.
-            if ("UMii" in obj['dirname'] and 'hair' in obj['dirname'].lower()) or 'Backpack' in asset_name:
+            if ("UMii" in collection['dirname'] and 'hair' in collection['dirname'].lower()) or 'Backpack' in asset_name:
                 # Generic NPC hair objects are weirdly transformed...
                 obj.rotation_euler.y -= pi/2
                 obj.rotation_euler.z -= pi/2
@@ -303,10 +297,10 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
             else:
                 obj.rotation_euler = (0, 0, 0)
                 for prefix in OBJ_PREFIXES:
-                    if obj['dirname'].startswith(prefix):
+                    if collection['dirname'].startswith(prefix):
                         obj.rotation_euler = (pi/2, 0, 0)
 
-            cleanup_mesh(obj, asset_name, image_map)
+            cleanup_mesh(collection, obj, asset_name, image_map)
 
         obj.data.name = obj.name
 
@@ -425,15 +419,14 @@ def map_img_filename_to_path(dirpath, files):
 
     return images
 
-def cleanup_mesh(obj, asset_name, image_map):
+def cleanup_mesh(collection, obj, asset_name, image_map):
     assert obj.type == 'MESH'
     for uv_layer, name in zip(obj.data.uv_layers, ("Albedo", "SPM")):
         # TODO: Might need a check here to see if all coordinates are at (0,0) and remove if so.
         uv_layer.name = name
     for mat in obj.data.materials:
-        orig_mat_name = mat.name
         if 'Mt_' in mat.name:
-            new_mat_name = asset_name + ": " + orig_mat_name.split("Mt_")[1]
+            new_mat_name = asset_name + ": " + mat.name.split("Mt_")[1]
             if new_mat_name in bpy.data.materials:
                 new_mat = bpy.data.materials.get(new_mat_name)
 
@@ -442,11 +435,10 @@ def cleanup_mesh(obj, asset_name, image_map):
                 continue
             else:
                 mat.name = new_mat_name
-        obj['orig_mat_name'] = orig_mat_name
 
-        setup_material(obj, mat, image_map)
+        setup_material(collection, obj, mat, image_map)
 
-def setup_material(obj, material, image_map):
+def setup_material(collection, obj, material, image_map):
     """A giant function that tries to set up complete materials based on nothing but the single
     Albedo texture that (usually) gets imported with the .fbx, relying entirely on naming conventions and hardcoding."""
 
@@ -465,15 +457,15 @@ def setup_material(obj, material, image_map):
 
     socket_map = load_assigned_textures(material, image_map)
     assigned_textures = [img for img in list(socket_map.keys())]
-    shader_name, guessed_textures = guess_shader_and_textures(obj, material, socket_map, image_map)
+    shader_name, guessed_textures = guess_shader_and_textures(collection, obj, material, socket_map, image_map)
     shader_node = init_nodetree(material, shader_name)
 
     # Create image nodes, guess UV layer by name, set image color spaces
     all_textures = assigned_textures + guessed_textures
-    spm_has_green = hookup_texture_nodes(obj, material, shader_node, all_textures, socket_map)
+    spm_has_green = hookup_texture_nodes(collection, material, shader_node, all_textures, socket_map)
     hookup_rgb_nodes(material, shader_node)
 
-    set_shader_socket_values(obj, material, shader_node, spm_has_green)
+    set_shader_socket_values(collection, obj, material, shader_node, spm_has_green)
 
 def load_assigned_textures(material, image_map) -> OrderedDict:
     assigned_textures = []
@@ -564,12 +556,12 @@ def guess_colorspace(material, img):
         return 'Non-Color' if tex_data['Type'] != 'Diffuse' else 'sRGB'
     return 'Non-Color' if "alb" not in img.name.lower() else 'sRGB'
 
-def guess_shader_and_textures(obj, material, socket_map, image_map) -> tuple[str, list[bpy.types.Image]]:
+def guess_shader_and_textures(collection, obj, material, socket_map, image_map) -> tuple[str, list[bpy.types.Image]]:
     """Guess shader type and textures based on the albedo, the object name, and so on."""
     lc_obname = obj.name.lower()
     lc_matname = material.name.lower()
-    lc_dirname = (obj.get('dirname') or "").lower()
-    lc_assetname = (obj.get('asset_name') or "").lower()
+    lc_dirname = (collection.get('dirname') or "").lower()
+    lc_assetname = (collection.get('asset_name') or "").lower()
 
     albedo = next((img for img, socket_name in socket_map.items() if socket_name=='Albedo'), None)
     if not albedo:
@@ -594,9 +586,9 @@ def guess_shader_and_textures(obj, material, socket_map, image_map) -> tuple[str
     guessed_textures = []
     if albedo:
         textureset_name = albedo.name.split("_Alb")[0]
-        obj['textureset_name'] = textureset_name
     else:
-        textureset_name = obj['dirname']
+        textureset_name = collection['dirname']
+    material['textureset_name'] = textureset_name
     for img_name, _filepath in image_map.items():
         if img_name.startswith(textureset_name):
             if "eye" in img_name.lower() and "eye" not in textureset_name.lower():
@@ -614,16 +606,16 @@ def guess_shader_and_textures(obj, material, socket_map, image_map) -> tuple[str
     all_textures = list(socket_map.keys())+guessed_textures
 
     shader_name = "BotW: Cel Shade"
-    if "eye" in lc_obname or "eye" in obj['orig_mat_name'].lower() and "mask" not in lc_obname and "ravio" not in lc_assetname:
+    if "eye" in lc_obname or "eye" in material['import_name'].lower() and "mask" not in lc_obname and "ravio" not in lc_assetname:
         shader_name = "BotW: Eye"
     if "arrow" in lc_dirname:
         if lc_dirname.endswith("_a"):
             # arrow bundles.
-            if "Stone" in obj['dirname'] + obj['import_name']:
+            if "Stone" in collection['dirname'] + obj['import_name']:
                 guessed_textures = [img for img in guessed_textures if "_A_Stone" in img.name]
             else:
                 guessed_textures = [img for img in guessed_textures if "_A_" in img.name and "stone" not in img.name.lower()]
-        elif "Stone" in obj['dirname'] + obj['import_name']:
+        elif "Stone" in collection['dirname'] + obj['import_name']:
             guessed_textures = [img for img in guessed_textures if "stone" in img.name.lower()]
         else:
             guessed_textures = [img for img in guessed_textures if ("stone" not in img.name.lower()) and ("_A_" not in img.name)]
@@ -634,14 +626,14 @@ def guess_shader_and_textures(obj, material, socket_map, image_map) -> tuple[str
             guessed_textures = [img for img in guessed_textures if "Blade_Fx" in img.name]
         else:
             guessed_textures = [img for img in guessed_textures if "Blade_Fx" not in img.name]
-    elif any(["EmmMsk.1" in img.name for img in all_textures]) and not any([word in obj['orig_mat_name'].lower() for word in ('handle', '_02')]):
+    elif any(["EmmMsk.1" in img.name for img in all_textures]) and not any([word in material['import_name'].lower() for word in ('handle', '_02')]):
         shader_name = "BotW: Elemental Weapon"
-    elif any(["Emm_Emm" in img.name for img in all_textures]) and 'Divine' in obj['asset_name']:
+    elif any(["Emm_Emm" in img.name for img in all_textures]) and 'Divine' in collection['asset_name']:
         shader_name = "BotW: Divine Eye"
     elif any(["clrmak" in img.name.lower() or "clrmsk" in img.name.lower() for img in all_textures]):
         shader_name = "BotW: Generic NPC"
     for prefix in OBJ_PREFIXES:
-        if obj['dirname'].startswith(prefix):
+        if collection['dirname'].startswith(prefix):
             shader_name = "BotW: Smooth Shade"
 
     # Order the textures nicely
@@ -658,7 +650,7 @@ def order_texture_list(imgs: list[bpy.types.Image]) -> list[bpy.types.Image]:
         ]
     )
 
-def hookup_texture_nodes(obj, material, shader_node, all_textures, socket_map) -> bool:
+def hookup_texture_nodes(collection, material, shader_node, all_textures, socket_map) -> bool:
     nodes = material.node_tree.nodes
     links = material.node_tree.links
 
@@ -692,7 +684,7 @@ def hookup_texture_nodes(obj, material, shader_node, all_textures, socket_map) -
         if socket_name == 'SPM' and pixel_image.has_green and not pixel_image.all_channels_match:
             spm_has_green = True
 
-        albedo_count, dye_count = create_helper_nodes(obj, material, img_node, pixel_image, socket_name, shader_node, albedo_count, dye_count)
+        albedo_count, dye_count = create_helper_nodes(collection, material, img_node, pixel_image, socket_name, shader_node, albedo_count, dye_count)
 
         # Hook up texture to target socket on the shader node group.
         shader_socket = shader_node.inputs.get(socket_name)
@@ -765,17 +757,16 @@ def guess_socket_name(img, shader_name) -> str:
 
     return ""
 
-def create_helper_nodes(obj, material, img_node, pixel_image, socket_name, shader_node, albedo_count, dye_count):
+def create_helper_nodes(collection, material, img_node, pixel_image, socket_name, shader_node, albedo_count, dye_count):
     shader_name = shader_node.node_tree.name
     nodes = material.node_tree.nodes
     links = material.node_tree.links
 
-    lc_obname = obj.name.lower()
-    lc_assetname = (obj.get('asset_name') or "").lower()
+    lc_assetname = (collection.get('asset_name') or "").lower()
 
     ensure_UV_node(material, img_node, shader_name)
 
-    if 'Hylian Nose' in obj['asset_name']:
+    if 'Hylian Nose' in collection['asset_name']:
         UMii_node = nodes.get("PingPong UVs")
         if not UMii_node:
             UMii_nt = ensure_shader("BotW: UMii Face UVs")
@@ -834,6 +825,9 @@ def create_helper_nodes(obj, material, img_node, pixel_image, socket_name, shade
             uv_node = link.from_node
             links.remove(link)
             if len(uv_node.outputs[0].links) == 0:
+                from_node = uv_node.outputs[0].links[0].from_node
+                if from_node:
+                    nodes.remove(from_node)
                 nodes.remove(uv_node)
         links.new(scroll_node.outputs[0], img_node.inputs[0])
         if 'guardian' in lc_assetname or 'ancient' in lc_assetname:
@@ -866,16 +860,20 @@ def ensure_UV_node(material, img_node, shader_name):
             uses_first_uvmap = True
         if "clrmak" in lc_img_name or "clrmsk" in lc_img_name:
             uses_first_uvmap = True
-        
 
         if not uses_first_uvmap:
-            uv_node = nodes.get("Second UV Channel")
-            if not uv_node:
+            fallback_node = nodes.get("Second UV Channel")
+            if not fallback_node:
+                fallback_node = nodes.new(type="ShaderNodeGroup")
+                fallback_nt = ensure_shader("BotW: UV Fallback")
+                fallback_node.node_tree = fallback_nt
+                fallback_node.location = img_node.location + Vector((-200, 0))
+                fallback_node.name = "Second UV Channel"
                 uv_node = nodes.new(type="ShaderNodeUVMap")
                 uv_node.uv_map = "SPM" # UVs[1].name
-                uv_node.name = "Second UV Channel"
-                uv_node.location = img_node.location + Vector((-200, 0))
-            links.new(uv_node.outputs[0], img_node.inputs[0])
+                uv_node.location = fallback_node.location + Vector((-200, 0))
+                links.new(uv_node.outputs[0], fallback_node.inputs[0])
+            links.new(fallback_node.outputs[0], img_node.inputs[0])
 
     img = img_node.image
     tex_data = get_tex_data(material, img)
@@ -975,11 +973,11 @@ def ensure_loaded_img(img_name, image_map):
 
     return existing_img
 
-def set_shader_socket_values(obj, material, shader_node, spm_has_green):
+def set_shader_socket_values(collection, obj, material, shader_node, spm_has_green):
     lc_matname = material.name.lower()
     lc_obname = obj.name.lower()
-    lc_dirname = (obj.get('dirname') or "").lower()
-    lc_assetname = (obj.get('asset_name') or "").lower()
+    lc_dirname = (collection.get('dirname') or "").lower()
+    lc_assetname = (collection.get('asset_name') or "").lower()
     metal, rubber, hair = False, False, False
 
     links = material.node_tree.links
@@ -999,7 +997,7 @@ def set_shader_socket_values(obj, material, shader_node, spm_has_green):
         metal = True
 
     # Hardcode some other values.
-    if obj['asset_name'] == "Majora's Mask":
+    if collection['asset_name'] == "Majora's Mask":
         rubber, hair, metal = True, True, False
         if 'eye' in lc_matname:
             set_socket_value(shader_node, 'Emission Color', [0.026384, 0.485653, 0.003931, 1.000000])
@@ -1007,19 +1005,19 @@ def set_shader_socket_values(obj, material, shader_node, spm_has_green):
             set_socket_value(shader_node, 'Emission Color', [0.513624, 0.105036, 0.022513, 1.000000])
     if 'ancient' in lc_assetname:
         set_socket_value(shader_node, 'Emission Color', [1.000000, 0.245151, 0.025910, 1.000000])
-    if 'orig_mat_name' in obj:
-        if obj['orig_mat_name'] == 'Mt_Lens':
+    if 'import_name' in material:
+        if material['import_name'] == 'Mt_Lens':
             set_socket_value(shader_node, 'Alpha', 0.05)
-        if obj['asset_name'] == 'Fierce Deity Mask' and obj['orig_mat_name'] == 'Mt_Eyeemm':
+        if collection['asset_name'] == 'Fierce Deity Mask' and material['import_name'] == 'Mt_Eyeemm':
             set_socket_value(shader_node, 'Emission Color', [0.700000, 0.700000, 0.700000, 1.000000])
             set_socket_value(shader_node, 'Emission Mask', 1.0)
             if shader_node.inputs['Emission Mask'].links:
                 links.remove(shader_node.inputs['Emission Mask'].links[0])
-    if 'Hylian Hair' in obj['asset_name'] or 'Hylian Child Hair' in obj['asset_name']:
+    if 'Hylian Hair' in collection['asset_name'] or 'Hylian Child Hair' in collection['asset_name']:
         set_socket_value(shader_node, 'Albedo', [0.039014, 0.028126, 0.006496, 1.000000])
-    if 'Hylian Beard' in obj['asset_name']:
+    if 'Hylian Beard' in collection['asset_name']:
         set_socket_value(shader_node, 'Albedo', [0.314406, 0.314406, 0.314406, 1.000000])
-    if 'Hylian Glasses' in obj['asset_name']:
+    if 'Hylian Glasses' in collection['asset_name']:
         set_socket_value(shader_node, 'Tint 0 Color', [0.023805, 0.023805, 0.023805, 1.000000])
         set_socket_value(shader_node, 'Metal', True)
 

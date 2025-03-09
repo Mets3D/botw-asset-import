@@ -17,6 +17,7 @@ TODO:
     consider the DgnMrgPrt and MergedGrudge stuff but probably ignore them.
 
 Things to do with final cleanup script or manual:
+    Hide InsideMat objects from viewport and render, and remove material or assign an Invisible material.
     Crop asset thumbnails with the operator.
     Could check for cases where a material uses an incomplete textureset (not as many of Alb, Spm, Nrm are used as exist)
     Make UILayout consistent across all files, or at least files of the same type.
@@ -64,3 +65,9 @@ Things I had to fix manually:
     A lot of work on enemy materials, and setting up re-skins as separate assets with shared mesh data.
     Some animals had the wrong textures hooked up. Was later improved in the import code.
     Some town objects import with a 90 degree X rotation.
+
+If I were to make map importing work:
+    - Many interior/exterior spaces houses are made of two files, an exterior and an interior (furniture). I combined these by un-marking one as an asset, and placing it inside the other. For these cases, the missing asset should be ignored when setting up the map.
+    - A small handful of assets I've deleted since they seemed like carbon copies (I'll try to keep track here, but there have been others):
+        - TwnObj_Village_IchikaraLamp_A_06 -> TwnObj_Village_IchikaraLamp_A_01
+        - TwnObj_Village_KorokTreeLeaf_LL_A_02 -> TwnObj_Village_KorokTreeLeaf_LL_A_01

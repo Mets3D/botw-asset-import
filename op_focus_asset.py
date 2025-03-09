@@ -76,21 +76,7 @@ def focus_action(context, action, focus_view=True):
     context.scene.frame_end = int(action.curve_frame_range.y)
 
     if focus_view:
-        org_selected = context.selected_objects[:]
-        for obj in org_selected:
-            obj.select_set(False)
-        for obj in rig.children_recursive:
-            try:
-                obj.select_set(True)
-            except RuntimeError:
-                # If the object cannot be selected for any reason, whatever, it's not that important.
-                pass
-        focus_selected_objects(context)
-        # Restore selection
-        for obj in rig.children_recursive:
-            obj.select_set(False)
-        for obj in org_selected:
-            obj.select_set(True)
+        focus_view_on_objects(context, rig.children_recursive)
 
     return {'FINISHED'}
 
@@ -110,30 +96,53 @@ def focus_collections(context, collections, focus_view=True, operator=None):
             operator.report({'ERROR'}, "No collection asset selected.")
         return {'FINISHED'}
 
+    child_colls = []
+    parent_colls = []
     for coll in bpy.data.collections:
         if coll in collections:
             # Children of selected collections
-            collections += coll.children_recursive
+            child_colls += coll.children_recursive
             continue
         # Parents of selected collections
         if any([child in collections for child in coll.children_recursive]):
-            collections.append(coll)
+            parent_colls.append(coll)
+
+    all_colls = collections + child_colls + parent_colls
 
     for coll in context.scene.collection.children_recursive:
         layer_collection = find_layer_collection_by_collection(
             context.view_layer.layer_collection, coll
         )
         if layer_collection:
-            layer_collection.hide_viewport = coll not in collections
+            if coll not in all_colls:
+                layer_collection.hide_viewport = True
+            else:
+                layer_collection.hide_viewport = False
 
     if focus_view:
-        bpy.ops.object.select_all(action='DESELECT')
+        objs = []
         for coll in collections:
-            for obj in coll.all_objects:
-                obj.select_set(True)
-            focus_selected_objects(context)
+            objs += coll.all_objects
+        focus_view_on_objects(context, objs)
 
     return {'FINISHED'}
+
+def focus_view_on_objects(context, objects):
+    org_selected = context.selected_objects[:]
+    for obj in org_selected:
+        obj.select_set(False)
+    for obj in objects:
+        try:
+            obj.select_set(True)
+        except RuntimeError:
+            # If the object cannot be selected for any reason, whatever, it's not that important.
+            pass
+    focus_selected_objects(context)
+    # Restore selection
+    for obj in objects:
+        obj.select_set(False)
+    for obj in org_selected:
+        obj.select_set(True)
 
 def focus_selected_objects(context):
     org_mode = context.active_object.mode if context.active_object else 'OBJECT'

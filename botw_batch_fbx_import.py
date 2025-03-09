@@ -1,5 +1,4 @@
-import bpy, os, re, json
-import math
+import bpy, os, re, json, hashlib, math
 from collections import OrderedDict
 from math import pi
 from pathlib import Path
@@ -24,10 +23,10 @@ DYES = ["Default", "Blue", "Red", "Yellow", "White", "Black", "Purple", "Green",
 
 OBJ_PREFIXES = ["Obj_", "TwnObj_", "TwnObjVillage_", "FldObj_", "DgnObj_", "DgnMrgPrt_"]
 PRIMITIVE_NAMES = ["_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane", "pSolid"]
-
+GARBAGE_MATS = ["InsideArea", "InsideMat"]
 
 def print_later(*msg):
-    PRINT_LATER.append("".join(str(msg)))
+    PRINT_LATER.append("".join([str(m) for m in msg]))
 
 def camel_to_spaces(str):
     return re.sub(r'(?<!^)(?=[A-Z])', ' ', str)
@@ -64,6 +63,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             image_map.update(map_img_filename_to_path(root, files))
 
         counter = 0
+        imported_objects = []
         for root, _subdirs, files in os.walk(self.directory):
             dae_files = [f for f in files if f.lower().endswith(".dae") and "Fxmdl" not in f]
             parent_coll = None
@@ -82,16 +82,15 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 if 'Animation' in asset_name:
                     continue
                 filepath = os.path.join(root, dae_file)
-                import_and_setup_single_dae(context, filepath, dae_file, asset_name, parent_coll, counter, image_map)
+                imported_objects += import_and_setup_single_dae(context, filepath, dae_file, asset_name, parent_coll, counter, image_map)
             counter += 1
 
         for lateprint in PRINT_LATER:
             print(lateprint)
 
-        bpy.ops.outliner.orphans_purge()
-
-        deduplicate_materials()
+        deduplicate_materials(imported_objects)
         refresh_images()
+        bpy.ops.outliner.orphans_purge()
 
         return {'FINISHED'}
 
@@ -210,7 +209,7 @@ def ensure_world_and_lights(context) -> bpy.types.World:
     world = bpy.data.worlds.get(WORLD_NAME)
     return world
 
-def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent_coll, counter=0, image_map={}):
+def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent_coll, counter=0, image_map={}) -> list[bpy.types.Object]:
     dirname = os.path.basename(os.path.dirname(filepath))
 
     # Create the collection and set it as active so all the objects get imported there to begin with.
@@ -224,7 +223,7 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
     objs = import_dae(context, filepath, discard_types=('EMPTY'))
     objs = import_and_merge_fbx_data(context, dae_objs=objs, dae_path=filepath, asset_name=asset_name)
     if not objs:
-        return
+        return []
 
     # Try to load an in-game icon for this asset, 
     # if user has specified an icon dirpath in the add-on preferences.
@@ -288,7 +287,12 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
 
             cleanup_mesh(collection, obj, asset_name, image_map)
 
+            if any([s in obj.name for s in GARBAGE_MATS]):
+                obj.hide_viewport, obj.hide_render = True, True
+
         obj.data.name = obj.name
+
+    return context.selected_objects[:]
 
 def import_and_merge_fbx_data(context, *, dae_objs, dae_path, asset_name):
     """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
@@ -426,6 +430,11 @@ def setup_material(collection, obj, material, image_map):
     """A giant function that tries to set up complete materials based on nothing but the single
     Albedo texture that (usually) gets imported with the .fbx, relying entirely on naming conventions and hardcoding."""
 
+    if any([s in material.name for s in GARBAGE_MATS]):
+        # This is some sorta gameengine mesh, we don't care.
+        obj.hide_viewport, obj.hide_render = True, True
+        return
+
     nodes = material.node_tree.nodes
     if 'BotW Output' in nodes:
         # This material was already processed, don't process it again as that might break stuff.
@@ -451,6 +460,7 @@ def setup_material(collection, obj, material, image_map):
     hookup_rgb_nodes(material, shader_node)
 
     set_shader_socket_values(collection, obj, material, shader_node, spm_has_green)
+    material['hash'] = hash_material(material)
 
 def load_assigned_textures(material, image_map) -> OrderedDict:
     missing_textures = []
@@ -477,6 +487,10 @@ def load_assigned_textures(material, image_map) -> OrderedDict:
                     type = 'Specular'
                 elif '_Nrm' in img.name:
                     type = 'Normal'
+                elif '_Msk' in img.name:
+                    type = 'Alpha'
+                elif sampler in ('_ms0', 'ms0', '_ms1', 'ms1'):
+                    type = 'Alpha'
                 elif sampler in ('_n0', 'n0', '_n1', 'n1'):
                     type = 'Normal'
                 elif sampler in ('_a0', 'a0', '_a1', 'a1'):
@@ -504,6 +518,8 @@ def load_assigned_textures(material, image_map) -> OrderedDict:
     for type, img in assigned_textures:
         if type == 'Diffuse':
             socket_map[img] = "Albedo"
+        if type == 'Alpha':
+            socket_map[img] = "Alpha"
         elif type == 'Specular':
             socket_map[img] = "SPM"
         elif type == 'Normal':
@@ -974,7 +990,12 @@ def ensure_loaded_img(img_name, image_map):
     else:
         existing_img = bpy.data.images.load(real_img_path, check_existing=True)
     
-    existing_img.name = img_name
+    if existing_img.name != img_name:
+        try:
+            existing_img.name = img_name
+        except AttributeError:
+            # Sometimes it's read-only, I think it's when it's a linked texture or something?
+            print_later("Couldn't rename texture: ", existing_img.name)
 
     return existing_img
 
@@ -1067,34 +1088,41 @@ def ensure_shader(nodetree_name) -> bpy.types.NodeTree:
 
     return new_nt
 
-def deduplicate_materials():
+def deduplicate_materials(objects):
     """Crunch relevant data into a hash, then user remap if this hash already existed."""
 
     mat_hashes = {}
     copy_counter = {}
-    for mat in bpy.data.materials:
-        if not mat.use_nodes:
+    for obj in objects:
+        if not hasattr(obj.data, 'materials'):
             continue
-        out_node = next((n for n in mat.node_tree.nodes if n.type == 'GROUP_OUTPUT'), None)
-        if not out_node:
-            continue
-        str_data = node_inputs_to_hashable(out_node)
-
-        mat_hash = hash(str_data)
-        if mat_hash in mat_hashes:
-            print_later("Duplicate material: ", mat.name, mat_hashes[mat_hash].name)
-            if len(mat.node_tree.nodes) < 3:
-                # print_later("Fewer than 3 nodes. Won't de-duplicate.")
-                pass
-            mat.user_remap(mat_hashes[mat_hash])
-            if mat_hash not in copy_counter:
-                copy_counter[mat_hash] = 0
-            copy_counter[mat_hash] += 1
-        else:
-            mat_hashes[mat_hash] = mat
+        for mat in obj.data.materials:
+            if 'hash' not in mat:
+                continue
+            mat_hash = mat['hash']
+            if mat_hash in mat_hashes:
+                print_later("Duplicate material: ", mat.name, mat_hashes[mat_hash].name)
+                if len(mat.node_tree.nodes) < 3:
+                    # print_later("Fewer than 3 nodes. Won't de-duplicate.")
+                    pass
+                mat.user_remap(mat_hashes[mat_hash])
+                if mat_hash not in copy_counter:
+                    copy_counter[mat_hash] = 0
+                copy_counter[mat_hash] += 1
+            else:
+                mat_hashes[mat_hash] = mat
 
     for mat_hash, count in copy_counter.items():
         print_later(mat_hashes[mat_hash].name, "had", count, "duplicates.")
+
+def hash_material(material) -> str:
+    if not material.use_nodes:
+        raise NotImplementedError("Hashing is only implemented for node materials at the moment.")
+
+    out_node = next((n for n in material.node_tree.nodes if n.type == 'OUTPUT_MATERIAL'), None)
+    assert out_node, "There must be a material output node for hashing: " + material.name
+
+    return hashlib.md5(node_inputs_to_hashable(out_node).encode("utf-8")).hexdigest()
 
 def node_inputs_to_hashable(node) -> str:
     """Recursively collect some data towards the left of the node-tree, 
@@ -1114,7 +1142,9 @@ def node_inputs_to_hashable(node) -> str:
         str_data += node.image.filepath
 
     for in_socket in node.inputs:
-        str_data += in_socket.name + str(in_socket.default_value)
+        if hasattr(in_socket, 'default_value'):
+            # Shader sockets don't have a default_value.
+            str_data += in_socket.name + str(in_socket.default_value)
         for link in in_socket.links:
             str_data += "->" + node_inputs_to_hashable(link.from_node)
 
@@ -1278,7 +1308,7 @@ class PixelImage:
     @property
     def has_alpha(self):
         if self._has_alpha == None:
-            self._has_alpha = any([p[3] for p in self.pixels_rgba])
+            self._has_alpha = any([p[3] != 1 for p in self.pixels_rgba])
         return self._has_alpha
 
     @property

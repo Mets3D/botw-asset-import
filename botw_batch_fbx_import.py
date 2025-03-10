@@ -263,6 +263,7 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
         json_base_path = os.path.join(prefs.game_models_folder, dirname)
 
     offsets = {}
+    dae_textures = get_textures_used_by_dae(filepath)
     for obj in context.selected_objects:
         if obj.type == 'ARMATURE':
             offsets[obj] = counter
@@ -296,6 +297,7 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
                 if m.type == 'ARMATURE' and not m.object:
                     obj.modifiers.remove(m)
             for m in obj.data.materials:
+                m['dae_textures'] = dae_textures.get(m['import_name'])
                 json_filepath = os.path.join(json_base_path, collection['file_name'] + "_" + m['import_name'] + ".json")
                 if os.path.isfile(json_filepath):
                     with open(json_filepath, 'r') as json_file:
@@ -407,6 +409,28 @@ def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = (
                 m.name += suffix
     return context.selected_objects[:]
 
+def get_textures_used_by_dae(filepath) -> dict[str, list[str]]:
+    content = ""
+    with open(filepath, "r", encoding="utf-8") as file:
+        content = file.read()
+
+    if not content:
+        return {}
+
+    mat_pattern = re.finditer(r'<effect id="Effect_(.*?)">.*?</effect>', content, re.DOTALL)
+
+    image_map = {}
+
+    for mat in mat_pattern:
+        mat_name = mat.group(1)
+        mat_content = mat.group(0)
+
+        images = re.findall(r'<init_from>(.*?)</init_from>', mat_content)
+
+        image_map[mat_name] = images
+
+    return image_map
+
 def cleanup_mesh(collection, obj, asset_name):
     assert obj.type == 'MESH'
     for uv_layer, name in zip(obj.data.uv_layers, ("Albedo", "SPM")):
@@ -464,22 +488,41 @@ def setup_material(collection, obj, material):
     set_shader_socket_values(collection, obj, material, shader_node, spm_has_green)
     material['hash'] = hash_material(material)
 
-def load_assigned_textures(material) -> OrderedDict:
+def load_assigned_textures(material) -> OrderedDict[bpy.types.Image, str]:
+    socket_map = load_assigned_json_textures(material)
+    socket_map.update(load_assigned_dae_textures(material))
+    socket_map.update(load_assigned_tile_textures(material))
+
+    # NOTE: The order of this dictionary matters, as the first entry for each socket will win.
+
+    return socket_map
+
+def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
+    """If a material was assigned a 'shader_data' custom property, that's data
+    we extracted from the .bmat using my modified version of Switch Toolbox.
+    """
     socket_map = OrderedDict()
-    missing_textures = []
-    assigned_textures = []
+
+    missing_tex_from_json = []
+    tex_from_json = []
     if 'shader_data' not in material:
         return socket_map
-
     shader_data = json.loads(material['shader_data'])
     texture_maps = shader_data["TextureMaps"]
     for tex_data in texture_maps:
+        name = tex_data['Name']
+        if name in ('MaterialAlb', 'MaterialCmb'):
+            # Based on FldObj_MountainLanayru_A_01, it seems that if a MaterialAlb is present in the TextureMaps,
+            # then the terrain maps which will be loaded later (in load_assigned_tile_textures)
+            # should overwrite any preceeding Albedo+Normal combos. Which is pretty crazy and weird. Great.
+            return OrderedDict()
         img = ensure_loaded_img(tex_data['Name'])
         if not img:
             print_later(f"Couldn't find texture: '{material.name}' -> {tex_data['Name']}")
-            missing_textures.append(tex_data['Name'])
+            missing_tex_from_json.append(tex_data['Name'])
             continue
         type = tex_data['Type'].strip()
+
         if type == 'Unknown':
             sampler = tex_data['SamplerName']
             # If the material data doesn't give us the texture type, we have some fallbacks to guess.
@@ -511,12 +554,12 @@ def load_assigned_textures(material) -> OrderedDict:
             else:
                 # There may be other useful sampler names for determining texture type.
                 pass
-        assigned_textures.append((type, img))
+        tex_from_json.append((type, img))
 
-    if missing_textures:
-        material['missing_textures'] = str(missing_textures)
+    if missing_tex_from_json:
+        material['missing_textures'] = str(missing_tex_from_json)
 
-    for type, img in assigned_textures:
+    for type, img in tex_from_json:
         # NOTE: Can add support for more shader socket names here.
         if type == 'Diffuse':
             socket_map[img] = "Albedo"
@@ -535,15 +578,14 @@ def load_assigned_textures(material) -> OrderedDict:
         else:
             socket_map[img] = type
 
-    socket_map.update(load_assigned_tile_textures(material))
-
-    # NOTE: Don't order textures that were read from the shader data .json.
-    # They might not be perfectly ordered, but they sometimes have bogus albedos, 
-    # which we don't want to bring to the top.
-
     return socket_map
 
-def load_assigned_tile_textures(material) -> OrderedDict():
+def load_assigned_dae_textures(material) -> OrderedDict[bpy.types.Image, str]:
+    dae_tex_names = material.get('dae_textures', [])
+    tex_from_dae = [ensure_loaded_img(img_name) for img_name in dae_tex_names]
+    return OrderedDict([(img, guess_socket_name(img)) for img in tex_from_dae if img])
+
+def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
     """Based on https://github.com/augmero/bmubin/blob/main/scripts/asset/shader_fixer.py"""
     socket_map = OrderedDict()
     shader_data = material.get('shader_data')
@@ -553,23 +595,35 @@ def load_assigned_tile_textures(material) -> OrderedDict():
     matparam = shader_data.get('matparam')
     if not matparam:
         return socket_map
+    
+    # texture_array_index has 6 integers between 0-82.
+    # These definitely correspond directly to the textures inside content/Terrain,
+    # and their order seems to matter too.
     tex_array_index_props = [value for key, value in matparam.items() if key.startswith('texture_array_index')]
-    # NOTE: bmubin's code also proposes checking 'uking_texture_array_texture' properties, 
-    # but I found cases where the values disagree with bmubin's implementation, so I'm ignoring them.
+
+    shaderoptions = shader_data['shaderassign']['options']
+    shader_array_index_props = [value for key, value in shaderoptions.items() if key.startswith('uking_texture_array_texture')]
+    all_default = [v==-1 for v in shader_array_index_props]
     tex_indicies = []
-    for tex_array_prop in tex_array_index_props:
+    for i, tex_array_prop in enumerate(tex_array_index_props):
+        if shader_array_index_props[i] == -1 and not all_default:
+            # If not all ShaderOptions are -1 but this one is,
+            # the corresponding terrain texture is not actually used.
+            # This most commonly happens for tex_array_prop==0.
+            continue
+
         tex_index_value = int(tex_array_prop['ValueFloat'][0])
         if tex_index_value in tex_indicies:
             continue
-        if tex_index_value < 0:
-            continue
-        if tex_index_value == 0 and len(tex_indicies) == 0:
-            # Only accept 0 as a real value if it would be the first in the list. 
-            # Otherwise, it's (hopefully) just a default value that isn't being used.
+        if tex_index_value == 0 and all_default:
+            # Terrain texture index 0 is a grass texture, but if the corresponding 
+            # ShaderOptions values are all defaults, it's the same as if it existed with a value of -1;
+            # So just like in the above case, this is not actually a reference to that grass texture.
             continue
         tex_indicies.append(tex_index_value)
 
-    offset = 1
+    alb_offset = 1
+    nrm_offset = 1
     for i, tex_index in enumerate(tex_indicies):
         material['use_tex_blending'] = True
         material[f'tile_tex{i}'] = tex_index
@@ -579,15 +633,15 @@ def load_assigned_tile_textures(material) -> OrderedDict():
         if albedo:
             if 'Albedo' not in list(socket_map.values()):
                 socket_map[albedo] = "Albedo"
-                offset = 0
+                alb_offset = 0
             else:
-                socket_map[albedo] = f'Albedo Blend {i+offset}'
+                socket_map[albedo] = f'Albedo Blend {i+alb_offset}'
         normal = ensure_loaded_img(f"MaterialCmb_Slice_{tex_index}_.png")
         if normal:
-            if 'Normal' not in list(socket_map.values()):
+            if 'Normal Map' not in list(socket_map.values()):
                 socket_map[normal] = "Normal Map"
-                offset = 0
-            socket_map[normal] = f'Normal Blend {i+offset}'
+                nrm_offset = 0
+            socket_map[normal] = f'Normal Blend {i+nrm_offset}'
 
     return socket_map
 
@@ -652,7 +706,6 @@ def guess_shader_and_textures(collection, obj, material, socket_map) -> tuple[st
         textureset_name = albedo.name.split("_Alb")[0]
     else:
         textureset_name = collection['dirname']
-    material['textureset_name'] = textureset_name
     for img_name, _filepath in _image_path_cache.items():
         if img_name.startswith(textureset_name):
             if "eye" in img_name.lower() and "eye" not in textureset_name.lower():
@@ -708,6 +761,8 @@ def guess_shader_and_textures(collection, obj, material, socket_map) -> tuple[st
 
     # Order the textures nicely
     guessed_textures = order_texture_list(guessed_textures)
+    if guessed_textures:
+        material['guessed_textures'] = [img.name for img in guessed_textures]
     return shader_name, guessed_textures
 
 def hookup_texture_nodes(collection, material, shader_node, all_textures, socket_map) -> bool:
@@ -794,10 +849,16 @@ def hookup_texture_nodes(collection, material, shader_node, all_textures, socket
 
     return spm_has_green
 
-def guess_socket_name(img, shader_name) -> str:
-    lc_img_name = img.name.lower()
-    # Guess target socket by the image name.
-    
+def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
+    """Guess what shader socket the given image should be plugged into."""
+
+    if type(img) == bpy.types.Image:
+        lc_img_name = img.name.lower()
+    elif type(img) == str:
+        lc_img_name = img.lower()
+    else:
+        return ""
+
     if shader_name == 'BotW: Eye' and 'shadow' in lc_img_name:
         return "Eye Shadow"
 

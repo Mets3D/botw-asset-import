@@ -20,6 +20,7 @@ module_names = (
     "op_thumbnail_from_viewport",
     "io_anim_seanim",
     "batch_import_seanim",
+    "deduplicate_materials",
 )
 
 

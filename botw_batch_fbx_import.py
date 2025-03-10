@@ -1,4 +1,4 @@
-import bpy, os, re, json, hashlib, math
+import bpy, os, re, json, math
 from collections import OrderedDict
 from math import pi
 from pathlib import Path
@@ -12,6 +12,8 @@ from .asset_names import asset_names
 from .collections import ensure_collection, set_active_collection
 from .widgets import ensure_widget, get_resources_blend_path
 from .prefs import get_addon_prefs
+from .deduplicate_materials import deduplicate_materials, hash_material
+from .material_data import MATERIAL_DATA, TERRAIN_TEX_NAMES
 
 PRINT_LATER = []
 
@@ -20,10 +22,42 @@ ICON_EXTENSION = ".jpg"
 TEXTURE_EXTENSION = ".png"
 
 DYES = ["Default", "Blue", "Red", "Yellow", "White", "Black", "Purple", "Green", "Light Blue", "Navy", "Orange", "Peach", "Crimson", "Light Yellow", "Brown", "Gray"]
-
 OBJ_PREFIXES = ["Obj_", "TwnObj_", "TwnObjVillage_", "FldObj_", "DgnObj_", "DgnMrgPrt_"]
 PRIMITIVE_NAMES = ["_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane", "pSolid"]
 GARBAGE_MATS = ["InsideArea", "InsideMat"]
+
+METAL_ROUGHNESS = 0.6
+
+_image_path_cache = {}
+def cache_image_paths() -> dict[str, str]:
+    """Create a mapping from image names to full filepaths in the Game Models folder."""
+
+    global _image_path_cache
+    prefs = get_addon_prefs()
+
+    for dirpath, _subfolders, files in os.walk(prefs.game_models_folder):
+        for file in files:
+            if prefs.game_models_folder:
+                dirpath = os.path.join(prefs.game_models_folder, os.path.basename(dirpath))
+                # print_later("Directory path: ", dirpath)
+            else:
+                print_later("Game models folder not specified.")
+            filepath = os.path.join(dirpath, file)
+            if not os.path.exists(filepath):
+                print_later(f"File does not exist: {filepath}")
+                continue
+
+            if file.lower().endswith(TEXTURE_EXTENSION):
+                _image_path_cache[file[:-len(TEXTURE_EXTENSION)]] = filepath
+
+    return _image_path_cache
+
+def get_image_path(image_name: str) -> str:
+    if not _image_path_cache:
+        cache_image_paths()
+    # Allow passing a full path, why not.
+    image_name = Path(image_name).stem
+    return _image_path_cache.get(image_name, "")
 
 def print_later(*msg):
     PRINT_LATER.append("".join([str(m) for m in msg]))
@@ -46,21 +80,9 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             self.report({'WARNING'}, "No folder selected")
             return {'CANCELLED'}
 
-        prefs = get_addon_prefs(context)
-
         ensure_botw_scene_settings(context)
 
         root_dir_name = self.directory.split(os.sep)[-2]
-
-        # First we walk through the folders and make a mapping of all images from 
-        # their name to their filepath in the Models directory.
-        # This has to be done in advance before importing meshes because many meshes
-        # don't have the necessary textures next to them.
-        # Hopefully the user has specified a folder with an extracted Models folder in the add-on prefs, 
-        # otherwise we just use the selected folder and hope for the best.
-        image_map = dict()
-        for root, _subfolders, files in os.walk(prefs.game_models_folder or self.directory):
-            image_map.update(map_img_filename_to_path(root, files))
 
         counter = 0
         imported_objects = []
@@ -82,7 +104,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 if 'Animation' in asset_name:
                     continue
                 filepath = os.path.join(root, dae_file)
-                imported_objects += import_and_setup_single_dae(context, filepath, dae_file, asset_name, parent_coll, counter, image_map)
+                imported_objects += import_and_setup_single_dae(context, filepath, dae_file, asset_name, parent_coll, counter)
             counter += 1
 
         for lateprint in PRINT_LATER:
@@ -209,7 +231,7 @@ def ensure_world_and_lights(context) -> bpy.types.World:
     world = bpy.data.worlds.get(WORLD_NAME)
     return world
 
-def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent_coll, counter=0, image_map={}) -> list[bpy.types.Object]:
+def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent_coll, counter=0) -> list[bpy.types.Object]:
     dirname = os.path.basename(os.path.dirname(filepath))
 
     # Create the collection and set it as active so all the objects get imported there to begin with.
@@ -263,7 +285,7 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
                 if obj.name.endswith("_"):
                     obj.name = obj.name[:-1]
             else:
-                print_later("Couldn't rename object: ", obj.name)
+                print_later(f"Couldn't rename object: {obj.name}")
             for primitive in PRIMITIVE_NAMES:
                 if primitive in obj.name:
                     obj.name = obj.name.split(primitive)[0]
@@ -278,14 +300,14 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
                 if os.path.isfile(json_filepath):
                     with open(json_filepath, 'r') as json_file:
                         json_data = json.load(json_file)
-                        json_data = process_json_for_blender(json_data)
-                        # Store as string because Blender doesn't let us store an arbitrary structure 
-                        # of lists nested inside dicts or something like that.
+                        json_data = tweak_material_json(json_data)
+                        # Store as string because Blender doesn't let us store 
+                        # an arbitrary structure of lists/dicts.
                         m['shader_data'] = json.dumps(json_data)
                 else:
-                    print_later("json file not found: ", json_filepath)
+                    print_later(f"Couldn't find material .json: {json_filepath}")
 
-            cleanup_mesh(collection, obj, asset_name, image_map)
+            cleanup_mesh(collection, obj, asset_name)
 
             if any([s in obj.name for s in GARBAGE_MATS]):
                 obj.hide_viewport, obj.hide_render = True, True
@@ -303,7 +325,7 @@ def import_and_merge_fbx_data(context, *, dae_objs, dae_path, asset_name):
     fbx_armatures = [o for o in fbx_objects if o.type == 'ARMATURE']
 
     if not fbx_objects:
-        print_later("No fbx objects imported for ", asset_name)
+        print_later(f"Couldn't find .fbx file for {dae_path}")
         return dae_objs
 
     ret_objs = dae_objs[:]
@@ -385,29 +407,7 @@ def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = (
                 m.name += suffix
     return context.selected_objects[:]
 
-def map_img_filename_to_path(dirpath, files):
-    """Loads all PNG images which are directly in the directory."""
-
-    images = {}
-    prefs = get_addon_prefs()
-
-    for file in files:
-        if prefs.game_models_folder:
-            dirpath = os.path.join(prefs.game_models_folder, os.path.basename(dirpath))
-            # print_later("Directory path: ", dirpath)
-        else:
-            print_later("Game models folder not specified.")
-        filepath = os.path.join(dirpath, file)
-        if not os.path.exists(filepath):
-            print_later("File does not exist: ", filepath)
-            continue
-
-        if file.lower().endswith(TEXTURE_EXTENSION):
-            images[file] = filepath
-
-    return images
-
-def cleanup_mesh(collection, obj, asset_name, image_map):
+def cleanup_mesh(collection, obj, asset_name):
     assert obj.type == 'MESH'
     for uv_layer, name in zip(obj.data.uv_layers, ("Albedo", "SPM")):
         # TODO: Might need a check here to see if all coordinates are at (0,0) and remove if so.
@@ -424,9 +424,9 @@ def cleanup_mesh(collection, obj, asset_name, image_map):
             else:
                 mat.name = new_mat_name
 
-        setup_material(collection, obj, mat, image_map)
+        setup_material(collection, obj, mat)
 
-def setup_material(collection, obj, material, image_map):
+def setup_material(collection, obj, material):
     """A giant function that tries to set up complete materials based on nothing but the single
     Albedo texture that (usually) gets imported with the .fbx, relying entirely on naming conventions and hardcoding."""
 
@@ -448,11 +448,13 @@ def setup_material(collection, obj, material, image_map):
                 existing.name = existing.name[:-2]
                 return
 
-    socket_map = load_assigned_textures(material, image_map)
+    socket_map = load_assigned_textures(material)
     assigned_textures = [img for img in list(socket_map.keys())]
-    material['assigned_textures'] = str(assigned_textures)
-    shader_name, guessed_textures = guess_shader_and_textures(collection, obj, material, socket_map, image_map)
+    shader_name, guessed_textures = guess_shader_and_textures(collection, obj, material, socket_map)
     shader_node = init_nodetree(material, shader_name)
+
+    if shader_name != 'BotW: Material Blend' and len(obj.data.color_attributes) > 0:
+        print_later(f"UNUSED VERTEX COLOR: {obj.name}")
 
     # Create image nodes, guess UV layer by name, set image color spaces
     all_textures = assigned_textures + guessed_textures
@@ -462,68 +464,68 @@ def setup_material(collection, obj, material, image_map):
     set_shader_socket_values(collection, obj, material, shader_node, spm_has_green)
     material['hash'] = hash_material(material)
 
-def load_assigned_textures(material, image_map) -> OrderedDict:
+def load_assigned_textures(material) -> OrderedDict:
+    socket_map = OrderedDict()
     missing_textures = []
     assigned_textures = []
-    if 'shader_data' in material:
-        shader_data = json.loads(material['shader_data'])
-        texture_maps = shader_data["TextureMaps"]
-        for tex_data in texture_maps:
-            img = ensure_loaded_img(tex_data['Name'], image_map)
-            if not img:
-                print_later("Missing texture: ", material.name, tex_data['Name'])
-                missing_textures.append(tex_data['Name'])
-                continue
-            if any([tup[0] == tex_data['Type'] for tup in assigned_textures]):
-                # Happens sometimes, especially with "Unknown" types (which are sometimes just regular Alb/Nrm/etc...).
-                print_later("Duplicate assigned texture: ", material.name, tex_data['Type'], tex_data['Name'])
-            type = tex_data['Type']
-            if type == 'Unknown':
-                sampler = tex_data['SamplerName']
-                # If the material data doesn't give us the texture type, we have some fallbacks to guess.
-                if '_Alb' in img.name:
-                    type = 'Diffuse'
-                elif '_Spm' in img.name:
-                    type = 'Specular'
-                elif '_Nrm' in img.name:
-                    type = 'Normal'
-                elif '_Msk' in img.name:
-                    type = 'Alpha'
-                elif sampler in ('_ms0', 'ms0', '_ms1', 'ms1'):
-                    type = 'Alpha'
-                elif sampler in ('_n0', 'n0', '_n1', 'n1'):
-                    type = 'Normal'
-                elif sampler in ('_a0', 'a0', '_a1', 'a1'):
-                    type = 'Diffuse'
-                elif sampler in ('_e0', 'e0', '_e1', 'e1'):
-                    type = 'Emission'
-                elif sampler in ('_ao0', 'ao0', '_ao1', 'ao1'):
-                    type = 'AO'
-                elif sampler in ('_s0', 's0', '_s1', 's1'):
-                    type = 'Specular'
-                elif sampler in ('_mt0', 'mt0', '_mt1', 'mt1'):
-                    type = 'Metallic'
-                elif sampler in ('_gn0'):
-                    # These sampler names have proved unreliable for determining texture type.
-                    pass
-                else:
-                    # There may be other useful sampler names for determining texture type.
-                    pass
-            assigned_textures.append((type, img))
+    if 'shader_data' not in material:
+        return socket_map
+
+    shader_data = json.loads(material['shader_data'])
+    texture_maps = shader_data["TextureMaps"]
+    for tex_data in texture_maps:
+        img = ensure_loaded_img(tex_data['Name'])
+        if not img:
+            print_later(f"Couldn't find texture: '{material.name}' -> {tex_data['Name']}")
+            missing_textures.append(tex_data['Name'])
+            continue
+        type = tex_data['Type'].strip()
+        if type == 'Unknown':
+            sampler = tex_data['SamplerName']
+            # If the material data doesn't give us the texture type, we have some fallbacks to guess.
+            if '_Alb' in img.name:
+                type = 'Diffuse'
+            elif '_Spm' in img.name:
+                type = 'Specular'
+            elif '_Nrm' in img.name:
+                type = 'Normal'
+            elif '_Msk' in img.name:
+                type = 'Alpha'
+            elif sampler in ('_ms0', 'ms0', '_ms1', 'ms1'):
+                type = 'Alpha'
+            elif sampler in ('_n0', 'n0', '_n1', 'n1'):
+                type = 'Normal'
+            elif sampler in ('_a0', 'a0', '_a1', 'a1'):
+                type = 'Diffuse'
+            elif sampler in ('_e0', 'e0', '_e1', 'e1'):
+                type = 'Emission'
+            elif sampler in ('_ao0', 'ao0', '_ao1', 'ao1'):
+                type = 'AO'
+            elif sampler in ('_s0', 's0', '_s1', 's1'):
+                type = 'Specular'
+            elif sampler in ('_mt0', 'mt0', '_mt1', 'mt1'):
+                type = 'Metallic'
+            elif sampler in ('_gn0'):
+                # These sampler names have proved unreliable for determining texture type.
+                pass
+            else:
+                # There may be other useful sampler names for determining texture type.
+                pass
+        assigned_textures.append((type, img))
 
     if missing_textures:
         material['missing_textures'] = str(missing_textures)
 
-    socket_map = OrderedDict()
     for type, img in assigned_textures:
+        # NOTE: Can add support for more shader socket names here.
         if type == 'Diffuse':
             socket_map[img] = "Albedo"
-        if type == 'Alpha':
+        elif type == 'Alpha':
             socket_map[img] = "Alpha"
         elif type == 'Specular':
             socket_map[img] = "SPM"
         elif type == 'Normal':
-            socket_map[img] = "Normal"
+            socket_map[img] = "Normal Map"
         elif type == 'Emission':
             socket_map[img] = "Emission Mask"
         elif type == 'AO':
@@ -531,12 +533,61 @@ def load_assigned_textures(material, image_map) -> OrderedDict:
         elif type == 'Metallic':
             socket_map[img] = "Metallic"
         else:
-            # TODO: add more tex types.
-            pass
+            socket_map[img] = type
+
+    socket_map.update(load_assigned_tile_textures(material))
 
     # NOTE: Don't order textures that were read from the shader data .json.
     # They might not be perfectly ordered, but they sometimes have bogus albedos, 
     # which we don't want to bring to the top.
+
+    return socket_map
+
+def load_assigned_tile_textures(material) -> OrderedDict():
+    """Based on https://github.com/augmero/bmubin/blob/main/scripts/asset/shader_fixer.py"""
+    socket_map = OrderedDict()
+    shader_data = material.get('shader_data')
+    if not shader_data:
+        return socket_map
+    shader_data = json.loads(shader_data)
+    matparam = shader_data.get('matparam')
+    if not matparam:
+        return socket_map
+    tex_array_index_props = [value for key, value in matparam.items() if key.startswith('texture_array_index')]
+    # NOTE: bmubin's code also proposes checking 'uking_texture_array_texture' properties, 
+    # but I found cases where the values disagree with bmubin's implementation, so I'm ignoring them.
+    tex_indicies = []
+    for tex_array_prop in tex_array_index_props:
+        tex_index_value = int(tex_array_prop['ValueFloat'][0])
+        if tex_index_value in tex_indicies:
+            continue
+        if tex_index_value < 0:
+            continue
+        if tex_index_value == 0 and len(tex_indicies) == 0:
+            # Only accept 0 as a real value if it would be the first in the list. 
+            # Otherwise, it's (hopefully) just a default value that isn't being used.
+            continue
+        tex_indicies.append(tex_index_value)
+
+    offset = 1
+    for i, tex_index in enumerate(tex_indicies):
+        material['use_tex_blending'] = True
+        material[f'tile_tex{i}'] = tex_index
+        if i > 1:
+            print_later(f"More than two tiling textures: {material.name}")
+        albedo = ensure_loaded_img(f"MaterialAlb_Slice_{tex_index}_.png")
+        if albedo:
+            if 'Albedo' not in list(socket_map.values()):
+                socket_map[albedo] = "Albedo"
+                offset = 0
+            else:
+                socket_map[albedo] = f'Albedo Blend {i+offset}'
+        normal = ensure_loaded_img(f"MaterialCmb_Slice_{tex_index}_.png")
+        if normal:
+            if 'Normal' not in list(socket_map.values()):
+                socket_map[normal] = "Normal Map"
+                offset = 0
+            socket_map[normal] = f'Normal Blend {i+offset}'
 
     return socket_map
 
@@ -549,7 +600,7 @@ def init_nodetree(material, shader_name) -> bpy.types.ShaderNode:
 
     # Create central shader node by loading node tree from resources.blend.
     shader_node = nodes.new("ShaderNodeGroup")
-    shader_node.node_tree = ensure_shader(shader_name)
+    shader_node.node_tree = ensure_nodetree(shader_name)
     shader_node.location = (200, 0)
     shader_node.width = 300
     shader_node.name = "Main Shader"
@@ -569,7 +620,7 @@ def guess_colorspace(material, img):
         return 'Non-Color' if tex_data['Type'] != 'Diffuse' else 'sRGB'
     return 'Non-Color' if "alb" not in img.name.lower() else 'sRGB'
 
-def guess_shader_and_textures(collection, obj, material, socket_map, image_map) -> tuple[str, list[bpy.types.Image]]:
+def guess_shader_and_textures(collection, obj, material, socket_map) -> tuple[str, list[bpy.types.Image]]:
     """Guess shader type and textures based on the albedo, the object name, and so on."""
     lc_obname = obj.name.lower()
     lc_matname = material.name.lower()
@@ -587,12 +638,12 @@ def guess_shader_and_textures(collection, obj, material, socket_map, image_map) 
                     continue
                 img_name = os.path.basename(img.filepath)
                 img.name = img_name
-                if img_name not in image_map:
+                img = ensure_loaded_img(img_name)
+                if not img:
                     continue
-                img = ensure_loaded_img(img_name, image_map)
-                if img and img != node.image:
+                if img != node.image:
                     img.user_remap(img)
-                if img and "_alb" in img.name.lower():
+                if "_alb" in img.name.lower():
                     albedo = img
 
     # Find all other textures with the same base name.
@@ -602,17 +653,12 @@ def guess_shader_and_textures(collection, obj, material, socket_map, image_map) 
     else:
         textureset_name = collection['dirname']
     material['textureset_name'] = textureset_name
-    for img_name, _filepath in image_map.items():
+    for img_name, _filepath in _image_path_cache.items():
         if img_name.startswith(textureset_name):
             if "eye" in img_name.lower() and "eye" not in textureset_name.lower():
                 # This avoids eg. animals using their eye textures for the body material.
                 continue
-            img = bpy.data.images.get(img_name)
-            if img_name in image_map:
-                real_img_path = image_map[img_name]
-                if not img:
-                    img = bpy.data.images.load(real_img_path, check_existing=True)
-                img.filepath = real_img_path
+            img = bpy.data.images.get(img_name) or ensure_loaded_img(img_name)
             if img and img not in socket_map:
                 guessed_textures.append(img)
 
@@ -632,8 +678,12 @@ def guess_shader_and_textures(collection, obj, material, socket_map, image_map) 
             guessed_textures = [img for img in guessed_textures if "stone" in img.name.lower()]
         else:
             guessed_textures = [img for img in guessed_textures if ("stone" not in img.name.lower()) and ("_A_" not in img.name)]
-
-    if any(["Blade_Fx" in img.name for img in all_textures]):
+    for prefix in OBJ_PREFIXES:
+        if collection['dirname'].startswith(prefix):
+            shader_name = "BotW: Smooth Shade"
+    if 'use_tex_blending' in material:
+        shader_name = "BotW: Material Blend"
+    elif any(["Blade_Fx" in img.name for img in all_textures]):
         if "blade" in lc_matname:
             shader_name = "BotW: Ancient Weapon Blade"
             guessed_textures = [img for img in guessed_textures if "Blade_Fx" in img.name]
@@ -645,73 +695,102 @@ def guess_shader_and_textures(collection, obj, material, socket_map, image_map) 
         shader_name = "BotW: Divine Eye"
     elif any(["clrmak" in img.name.lower() or "clrmsk" in img.name.lower() for img in all_textures]):
         shader_name = "BotW: Generic NPC"
-    for prefix in OBJ_PREFIXES:
-        if collection['dirname'].startswith(prefix):
-            shader_name = "BotW: Smooth Shade"
+
+    def order_texture_list(imgs: list[bpy.types.Image]) -> list[bpy.types.Image]:
+        order = ["Alb", "AO", "Spm", "Nrm", "Emm", "Fx"]
+        return sorted(imgs,
+            key=lambda img: 
+            [
+                int(c) if c.isdigit() else c for c in re.split(r'(\d+)',
+                str(next((i for i, word in enumerate(order) if word in img.name), -1)) + img.name)
+            ]
+        )
 
     # Order the textures nicely
     guessed_textures = order_texture_list(guessed_textures)
     return shader_name, guessed_textures
-
-def order_texture_list(imgs: list[bpy.types.Image]) -> list[bpy.types.Image]:
-    order = ["Alb", "AO", "Spm", "Nrm", "Emm", "Fx"]
-    return sorted(imgs,
-        key=lambda img: 
-        [
-            int(c) if c.isdigit() else c for c in re.split(r'(\d+)',
-            str(next((i for i, word in enumerate(order) if word in img.name), -1)) + img.name)
-        ]
-    )
 
 def hookup_texture_nodes(collection, material, shader_node, all_textures, socket_map) -> bool:
     nodes = material.node_tree.nodes
     links = material.node_tree.links
 
     shader_name = shader_node.node_tree.name
+    use_dye_labels = len([img for img, socket in socket_map.items() if socket=='Albedo']) == len(DYES)
     albedo_count = 0
     dye_count = 0
     spm_has_green = False
     for i, img in enumerate(all_textures):
         img.colorspace_settings.name = guess_colorspace(material, img)
 
-        socket_name = ""
-        if img.name in socket_map:
-            socket_name = socket_map[img.name]
-        else:
-            socket_name = guess_socket_name(img, shader_name)
-
-        # TODO: This could be more optimized by only calculating this once per image, after loading them. But meh, it's fast enough.
         pixel_image = PixelImage.from_blender_image(img)
         if pixel_image.is_single_color and socket_name != 'Albedo':
             # If the whole image is just one color, use an RGB node instead.
             img_node = nodes.new(type="ShaderNodeRGB")
             img_node.outputs[0].default_value = pixel_image.pixels_rgba[0]
-            img_node.label = img.name
         else:
             img_node = nodes.new(type="ShaderNodeTexImage")
             img_node.image = img
             img_node.width = 400
+        img_node.label = img.name
 
-        img_node.location = (-300, (i-dye_count)*-300)
+        socket_name = ""
+        if img in socket_map:
+            socket_name = socket_map[img]
+        if socket_name in ("", "Unknown"):
+            socket_name = guess_socket_name(img, shader_name)
+            img_node.label = "(Guess) " + img_node.label
+
+        img_node.location = (-300, i* -300)
 
         if socket_name == 'SPM' and pixel_image.has_green and not pixel_image.all_channels_match:
             spm_has_green = True
 
-        albedo_count, dye_count = create_helper_nodes(collection, material, img_node, pixel_image, socket_name, shader_node, albedo_count, dye_count)
+        albedo_count, dye_count = create_helper_nodes(collection, material, img_node, pixel_image, socket_name, shader_node, albedo_count, dye_count, use_dye_labels)
 
         # Hook up texture to target socket on the shader node group.
         shader_socket = shader_node.inputs.get(socket_name)
+
         img_node.label = socket_name + " " + img_node.label
-        if shader_socket:
-            if len(shader_socket.links) == 0:
-                links.new(img_node.outputs['Color'], shader_socket)
+        if not shader_socket:
+            img_node.label = "No socket: " + socket_name
+            print_later(f"Couldn't find shader socket: '{material.name}' -> '{socket_name}'")
+            continue
+
+        # Bit of a hack, re-direct Material Blend socket names that need to know the shader type. 
+        # Could do this in load_assigned_textures, but I cba to re-organize the code to already know the shader type by the time that function runs.
+        if shader_node.node_tree.name == 'BotW: Material Blend':
+            # This shader blends up to 3 materials together.
+            if len(shader_socket.links) > 0:
                 if socket_name == 'Albedo':
-                    nodes.active = img_node
-            # Since transparency doesn't (always) get its own texture node, implicitly hook up the Alpha of the Albedo.
-            if socket_name in ('Albedo', 'Fx Texture Distorted') and pixel_image.has_alpha:
-                alpha_socket = shader_node.inputs.get('Alpha')
-                if alpha_socket and len(alpha_socket.links) == 0 and 'Alpha' in img_node.outputs:
-                    links.new(img_node.outputs['Alpha'], alpha_socket)
+                    socket_name = 'Albedo Blend 1'
+                elif socket_name == 'Normal':
+                    socket_name = 'Normal Blend 1'
+                elif socket_name == 'Albedo Blend 1':
+                    socket_name = 'Albedo Blend 2'
+                elif socket_name == 'Normal Blend 1':
+                    socket_name = 'Normal Blend 2'
+                shader_socket = shader_node.inputs.get(socket_name)
+                img_node.label = socket_name + " " + img_node.label
+
+        if socket_name == "Albedo Blend 1":
+            set_socket_value(shader_node, f"Blend 1 Factor", 1)
+
+        if len(shader_socket.links) == 0:
+            links.new(img_node.outputs['Color'], shader_socket)
+        else:
+            print_later(f"Shader socket already taken: '{material.name}' -> '{img.name}' ({socket_name})")
+
+        if is_transparent(material) != False:
+            material.surface_render_method = 'BLENDED'
+        # Since transparency doesn't (always) get its own texture node, implicitly hook up the Alpha of the Albedo.
+        if socket_name in ('Albedo', 'Fx Texture Distorted') and pixel_image.has_alpha: # and (img_node.outputs[0].links) > 0 
+            alpha_socket = shader_node.inputs.get('Alpha')
+            if alpha_socket and len(alpha_socket.links) == 0 and 'Alpha' in img_node.outputs:
+                links.new(img_node.outputs['Alpha'], alpha_socket)
+
+    first_plugged_img = next((s.links[0].from_node for s in shader_node.inputs if len(s.links)>0 and s.links[0].from_node.type == 'TEX_IMAGE'), None)
+    if first_plugged_img:
+        nodes.active = first_plugged_img
 
     return spm_has_green
 
@@ -770,7 +849,7 @@ def guess_socket_name(img, shader_name) -> str:
 
     return ""
 
-def create_helper_nodes(collection, material, img_node, pixel_image, socket_name, shader_node, albedo_count, dye_count):
+def create_helper_nodes(collection, material, img_node, pixel_image, socket_name, shader_node, albedo_count=0, dye_count=0, use_dye_labels=False) -> tuple[int, int]:
     shader_name = shader_node.node_tree.name
     nodes = material.node_tree.nodes
     links = material.node_tree.links
@@ -780,9 +859,10 @@ def create_helper_nodes(collection, material, img_node, pixel_image, socket_name
     ensure_UV_node(material, img_node, shader_name)
 
     if 'Hylian Nose' in collection['asset_name']:
+        # TODO: Test this again, this special case should no longer be necessary since we implemented .json material data.
         UMii_node = nodes.get("PingPong UVs")
         if not UMii_node:
-            UMii_nt = ensure_shader("BotW: UMii Face UVs")
+            UMii_nt = ensure_nodetree("BotW: UMii Face UVs")
             UMii_node = nodes.new("ShaderNodeGroup")
             UMii_node.node_tree = UMii_nt
             UMii_node.name = "PingPong UVs"
@@ -794,7 +874,7 @@ def create_helper_nodes(collection, material, img_node, pixel_image, socket_name
     if shader_name == 'BotW: Eye' and socket_name in ('Albedo', 'Emission Color', 'Emission Mask', 'Normal Map') and len(img_node.inputs) > 0:
         eye_rig_node = nodes.get("Eye Rig")
         if not eye_rig_node:
-            eye_rig_nt = ensure_shader("BotW: Eye Rig")
+            eye_rig_nt = ensure_nodetree("BotW: Eye Rig")
             eye_rig_node = nodes.new("ShaderNodeGroup")
             eye_rig_node.node_tree = eye_rig_nt
             eye_rig_node.location = img_node.location + Vector((-400, 0))
@@ -802,11 +882,11 @@ def create_helper_nodes(collection, material, img_node, pixel_image, socket_name
             eye_rig_node.name = "Eye Rig"
         links.new(eye_rig_node.outputs[0], img_node.inputs[0])
     elif socket_name == 'Albedo' and shader_name == 'BotW: Cel Shade':
-        # You can dye armors in the game, and those have different albedo textures.
-        # Let's stack them above the default one, in a compact way.
         if albedo_count > 0:
             dye_count += 1
-            img_node.label = str(albedo_count)# + ": " + DYES[albedo_count]
+            img_node.label = str(albedo_count)
+            if use_dye_labels:
+                img_node.label += ": " + DYES[albedo_count]
             img_node.location = (-300, dye_count*60)
             img_node.hide = True
         albedo_count += 1
@@ -815,7 +895,7 @@ def create_helper_nodes(collection, material, img_node, pixel_image, socket_name
         distorted_img.image = img_node.image
         distorted_img.width = img_node.width
         distorted_img.location = img_node.location + Vector((0, -300))
-        distortion_shader = ensure_shader('BotW: Ancient Weapon Blade Heat Distortion')
+        distortion_shader = ensure_nodetree('BotW: Ancient Weapon Blade Heat Distortion')
         distortion_node = nodes.new("ShaderNodeGroup")
         distortion_node.location = distorted_img.location + Vector((-400, 0))
         distortion_node.width = 350
@@ -826,7 +906,7 @@ def create_helper_nodes(collection, material, img_node, pixel_image, socket_name
         # Only on elemental weapons and obliterator.
         scroll_node = nodes.get("UV Scroll")
         if not scroll_node:
-            scroll_shader = ensure_shader('BotW: Emission Scroll')
+            scroll_shader = ensure_nodetree('BotW: Emission Scroll')
             scroll_node = nodes.new("ShaderNodeGroup")
             scroll_node.location = img_node.location + Vector((-400, 0))
             scroll_node.width = 350
@@ -853,7 +933,7 @@ def create_helper_nodes(collection, material, img_node, pixel_image, socket_name
         else:
             img_node.label = "(no green; sketch highlight mask)"
     elif socket_name == 'Metallic':
-        set_socket_value(shader_node, 'Roughness', 0.6)
+        set_socket_value(shader_node, 'Roughness', METAL_ROUGHNESS)
 
     return albedo_count, dye_count
 
@@ -878,7 +958,7 @@ def ensure_UV_node(material, img_node, shader_name):
             fallback_node = nodes.get("Second UV Channel")
             if not fallback_node:
                 fallback_node = nodes.new(type="ShaderNodeGroup")
-                fallback_nt = ensure_shader("BotW: UV Fallback")
+                fallback_nt = ensure_nodetree("BotW: UV Fallback")
                 fallback_node.node_tree = fallback_nt
                 fallback_node.location = img_node.location + Vector((-200, 0))
                 fallback_node.name = "Second UV Channel"
@@ -896,7 +976,7 @@ def ensure_UV_node(material, img_node, shader_name):
         if pong_x or pong_y:
             pingpong_node = nodes.get("PingPong UVs")
             if not pingpong_node:
-                pingpong_nt = ensure_shader("BotW: UMii Face UVs")
+                pingpong_nt = ensure_nodetree("BotW: UMii Face UVs")
                 pingpong_node = nodes.new("ShaderNodeGroup")
                 pingpong_node.node_tree = pingpong_nt
                 pingpong_node.name = "PingPong UVs"
@@ -922,19 +1002,15 @@ def texture_uses_first_uvmap(material, img) -> bool or None:
     So if this function returns False, it will either use 2nd UVMap, or some procedural UVMap,
     such as scrolling UVs.
     """
-    if 'shader_data' in material:
-        shader_data = json.loads(material['shader_data'])
-        tex_maps = shader_data['TextureMaps']
-        tex_idx = 0
-        for tex_info in tex_maps:
-            if tex_info['Name'] == Path(img.filepath).stem:
-                tex_idx = tex_info['textureUnit'] - 1
-                break
-
-        shader_options = shader_data['shaderassign']['options']
-        # For TotK, this might have to be o_texture{tex_idx}_texcoord, but I never tried.
-        uv_idx = shader_options.get(f'uking_texture{tex_idx}_texcoord')
-        return uv_idx == 0
+    tex_data = get_tex_data(material, img)
+    if not tex_data:
+        return True
+    tex_idx = tex_data['textureUnit'] - 1
+    shader_data = json.loads(material['shader_data'])
+    shader_options = shader_data['shaderassign']['options']
+    # For TotK, this might have to be `o_texture{tex_idx}_texcoord``, but I never tried.
+    uv_idx = shader_options.get(f'uking_texture{tex_idx}_texcoord')
+    return uv_idx == 0
 
 def hookup_rgb_nodes(material, shader_node):
     nodes = material.node_tree.nodes
@@ -975,14 +1051,20 @@ def get_color_values(material) -> list[Vector]:
                     colors.append(vec)
     return colors
 
-def ensure_loaded_img(img_name, image_map):
+def is_transparent(material) -> bool or None:
+    if 'shader_data' not in material:
+        return None
+
+    shader_data = json.loads(material['shader_data'])
+    return shader_data['isTransparent']
+
+def ensure_loaded_img(img_name):
     if not img_name.endswith(TEXTURE_EXTENSION):
         img_name = img_name + TEXTURE_EXTENSION
 
-    if img_name not in image_map:
+    real_img_path = get_image_path(img_name)
+    if not real_img_path:
         return
-
-    real_img_path = image_map[img_name]
 
     existing_img = bpy.data.images.get(img_name)
     if existing_img:
@@ -995,7 +1077,7 @@ def ensure_loaded_img(img_name, image_map):
             existing_img.name = img_name
         except AttributeError:
             # Sometimes it's read-only, I think it's when it's a linked texture or something?
-            print_later("Couldn't rename texture: ", existing_img.name)
+            print_later(f"Couldn't rename texture: {existing_img.name}")
 
     return existing_img
 
@@ -1047,6 +1129,10 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         set_socket_value(shader_node, 'Tint 0 Color', [0.023805, 0.023805, 0.023805, 1.000000])
         set_socket_value(shader_node, 'Metal', True)
 
+    if shader_node.node_tree.name == 'BotW: Material Blend':
+        set_socket_value(shader_node, "Transparent Edges", is_transparent(material))
+        ensure_edge_attribute(bpy.context, obj)
+
     for socket_name, value in (('Rubber', rubber), ('Metal', metal), ('Hair', hair)):
         set_socket_value(shader_node, socket_name, value)
 
@@ -1057,7 +1143,17 @@ def set_socket_value(group_node, socket_name, socket_value, output=False):
     if socket:
         socket.default_value = socket_value
 
-def ensure_shader(nodetree_name) -> bpy.types.NodeTree:
+def ensure_edge_attribute(context, object):
+    if 'edge' in object.data.attributes:
+        return
+
+    edge_nt = ensure_nodetree("Mark Edges")
+    gn_modifier = object.modifiers.new("Store Edge Attribute", "NODES")
+    gn_modifier.node_group = edge_nt
+    with context.temp_override(active_object=object):
+        bpy.ops.object.modifier_apply(modifier=gn_modifier.name)
+
+def ensure_nodetree(nodetree_name) -> bpy.types.NodeTree:
     """Append node tree from resources.blend, unless they already exist in this file.
     Also de-duplicate resulting light objects and nested node trees.
     """
@@ -1088,68 +1184,6 @@ def ensure_shader(nodetree_name) -> bpy.types.NodeTree:
 
     return new_nt
 
-def deduplicate_materials(objects):
-    """Crunch relevant data into a hash, then user remap if this hash already existed."""
-
-    mat_hashes = {}
-    copy_counter = {}
-    for obj in objects:
-        if not hasattr(obj.data, 'materials'):
-            continue
-        for mat in obj.data.materials:
-            if 'hash' not in mat:
-                continue
-            mat_hash = mat['hash']
-            if mat_hash in mat_hashes:
-                print_later("Duplicate material: ", mat.name, mat_hashes[mat_hash].name)
-                if len(mat.node_tree.nodes) < 3:
-                    # print_later("Fewer than 3 nodes. Won't de-duplicate.")
-                    pass
-                mat.user_remap(mat_hashes[mat_hash])
-                if mat_hash not in copy_counter:
-                    copy_counter[mat_hash] = 0
-                copy_counter[mat_hash] += 1
-            else:
-                mat_hashes[mat_hash] = mat
-
-    for mat_hash, count in copy_counter.items():
-        print_later(mat_hashes[mat_hash].name, "had", count, "duplicates.")
-
-def hash_material(material) -> str:
-    if not material.use_nodes:
-        raise NotImplementedError("Hashing is only implemented for node materials at the moment.")
-
-    out_node = next((n for n in material.node_tree.nodes if n.type == 'OUTPUT_MATERIAL'), None)
-    assert out_node, "There must be a material output node for hashing: " + material.name
-
-    return hashlib.md5(node_inputs_to_hashable(out_node).encode("utf-8")).hexdigest()
-
-def node_inputs_to_hashable(node) -> str:
-    """Recursively collect some data towards the left of the node-tree, 
-    resulting in a string that uniquely represents this node and its dependencies.
-    Useful for de-duplicating node set-ups.
-
-    Not meant for fringe cases:
-    - Re-routes contribute to uniqueness
-    - Node positions don't contribute to uniqueness
-    - Only checks what's connected to the passed node on the left side
-    - Does not check node properties that are not sockets
-    """
-    str_data = node.type
-    if node.type == 'GROUP' and node.node_tree:
-        str_data += node.node_tree.name
-    elif node.type == 'TEX_IMAGE' and node.image:
-        str_data += node.image.filepath
-
-    for in_socket in node.inputs:
-        if hasattr(in_socket, 'default_value'):
-            # Shader sockets don't have a default_value.
-            str_data += in_socket.name + str(in_socket.default_value)
-        for link in in_socket.links:
-            str_data += "->" + node_inputs_to_hashable(link.from_node)
-
-    return str_data
-
 def refresh_images():
     for m in bpy.data.materials:
         if not m.node_tree:
@@ -1161,14 +1195,22 @@ def refresh_images():
 class PixelImage:
     # Extract some very specific info about the pixel contents of a Blender image texture.
 
+    cache = {}
+
     @classmethod
     def from_blender_image(cls, bpy_img: bpy.types.Image):
+        if bpy_img.name in cls.cache:
+            return cls.cache[bpy_img.name]
+
         # NOTE: Careful! Accessing bpy_img.pixels many times is very slow! Copying all of it once is fast!
         pixels = bpy_img.pixels[:]
         width = bpy_img.size[0]
         height = bpy_img.size[1]
 
-        return cls(width, height, pixels)
+        instance = cls(width, height, pixels)
+        cls.cache[bpy_img.name] = instance
+
+        return instance
 
     def __init__(self, width, height, pixels):
         pixels = pixels[:]
@@ -1317,30 +1359,17 @@ class PixelImage:
             self._all_channels_match = all([p[0]==p[1]==p[2]==p[3] for p in self.pixels_rgba])
         return self._all_channels_match
 
-def process_json_for_blender(data):
-    """Recursively processes JSON data for Blender ID properties:
-    - Converts string numbers to integers where possible.
-    - Converts large integers (outside int32 range) to strings.
-    - Replaces None (JSON null) with empty string.
-    - Ensures lists contain only valid Blender types.
-    """
+def tweak_material_json(data):
+    """Recursively convert string numbers to integers where possible."""
     if isinstance(data, dict):
-        return {str(key): process_json_for_blender(value) for key, value in data.items()}
+        return {str(key): tweak_material_json(value) for key, value in data.items()}
     elif isinstance(data, list):
-        return [process_json_for_blender(item) for item in data]
-    elif isinstance(data, str):
-        if data.isdigit() or (data.startswith('-') and data[1:].isdigit()):
-            num = int(data)
-            return num
-        return data
-    elif isinstance(data, int):
-        return str(data) if data > 2**31 - 1 or data < -2**31 else data
-    elif isinstance(data, float) or isinstance(data, bool):
-        return data  # Floats & bools are fine
-    elif data is None:
-        return ""  # Blender does not allow None; replace with empty string
-    else:
-        return str(data)  # Convert anything unexpected to a string
+        return [tweak_material_json(item) for item in data]
+    elif isinstance(data, str) and (data.isdigit() or (data.startswith('-') and data[1:].isdigit())):
+        num = int(data)
+        return num
+
+    return data
 
 # Register the operator
 def menu_func_import(self, context):

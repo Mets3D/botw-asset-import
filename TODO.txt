@@ -1,14 +1,18 @@
 
 TODO:
+    Check FldObj_MountainLanayru_A_01
+        It has an ice texture assigned in the shader data but it's fucking bullshit. It also has MaterialAlb as a TextureMap in the data, so maybe in such cases we ignore any other textures? that's wild tho...
+        It has a 2nd UV channel but I have no idea why.
+    TwnObj_HyruleCastleGround_Cliff_A_03
+        So, smubin does this correctly for sure, I checked in-game, it looks great.
+        Mine looks correct too, for now.
+    FldObj_SkullRockBone_A_01
+        smubin doesn't load any extra textures here, I think it's because there is no shaderOptionsIndexArray, and it's ignoring its "indexArray": [23, 23, 23, 0, 0, 0]
+        Mine loads this correctly for now, although in-game the layered texture is a bit desaturated and I couldn't find a value for that, but it's not a big deal. I'm also probably using the wrong normal map but again, can't find any relevant data, and bmubin... I don't know what bmubin does with the normal map actually, hm.
+
     Load material data on existing objects to whatever extent possible
         Detect and inspect discrepancies (maybe I can't be arsed tbh)
-    
-    Some code in bmubin suggests that renderState tells us transparency mode:
-        "Mt_CmnTex_Etc_IbusuParts_A_01": {"renderState": "Translucent"},
-        "Mt_CmnTex_Metal_IbtEX_A_Screw_A": {"renderState": "AlphaMask"},
-        "Mt_DgnObj_IbtElectric_Fence_NetWallB_01": {"renderState": "AlphaMask"},
-        "Mt_mnTex_Etc_IbutsuPart_D": {"renderState": "Translucent"}, 
-    
+
     Motorcycle animation
     Friendly NPCs animation
     finish TwnObj (there's so much hyrule castle to do and it feels kinda pointless without map data...)
@@ -16,7 +20,13 @@ TODO:
     DgnObj
     consider the DgnMrgPrt and MergedGrudge stuff but probably ignore them.
 
+    We can probably remove material_data.py from the add-on.
+    We could consider including all the material .json's with the add-on, it's probably not much space.
+    Should include all terrain materials, maybe even mark them as assets.
+        A UDIM set-up for them would be interesting, but I don't really want to rename the files.
+
 Things to do with final cleanup script or manual:
+    Clean up custom properties like those from cloudrig, idk why they even exist? maybe it's only on the smubin stuff.
     Hide InsideMat objects from viewport and render, and remove material or assign an Invisible material.
     Crop asset thumbnails with the operator.
     Could check for cases where a material uses an incomplete textureset (not as many of Alb, Spm, Nrm are used as exist)
@@ -65,6 +75,8 @@ Things I had to fix manually:
     A lot of work on enemy materials, and setting up re-skins as separate assets with shared mesh data.
     Some animals had the wrong textures hooked up. Was later improved in the import code.
     Some town objects import with a 90 degree X rotation.
+
+Could be fun to make a leaves particle system using FlowerFallenLeavesAlb_Slice_0_.png etc
 
 If I were to make map importing work:
     - Many interior/exterior spaces houses are made of two files, an exterior and an interior (furniture). I combined these by un-marking one as an asset, and placing it inside the other. For these cases, the missing asset should be ignored when setting up the map.

@@ -474,16 +474,15 @@ def setup_material(collection, obj, material):
 
     socket_map = load_assigned_textures(material)
     assigned_textures = [img for img in list(socket_map.keys())]
-    shader_name, guessed_textures = guess_shader_and_textures(collection, obj, material, socket_map)
+    shader_name, socket_map = guess_shader_and_textures(collection, obj, material, socket_map)
     shader_node = init_nodetree(material, shader_name)
 
-    if shader_name != 'BotW: Material Blend' and len(obj.data.color_attributes) > 0:
-        material['WARNING'] = "Unused vertex color. This material should probably use Terrain textures blended using the vertex color info."
-        print_later(f"UNUSED VERTEX COLOR: {obj.name}")
+    # if shader_name != 'BotW: Material Blend' and len(obj.data.color_attributes) > 0:
+    #     material['WARNING'] = "Unused vertex color. This material should probably use Terrain textures blended using the vertex color info."
+    #     print_later(f"UNUSED VERTEX COLOR: {obj.name}")
 
     # Create image nodes, guess UV layer by name, set image color spaces
-    all_textures = assigned_textures + guessed_textures
-    spm_has_green = hookup_texture_nodes(collection, material, shader_node, all_textures, socket_map)
+    spm_has_green = hookup_texture_nodes(collection, material, shader_node, socket_map)
     hookup_rgb_nodes(material, shader_node)
 
     set_shader_socket_values(collection, obj, material, shader_node, spm_has_green)
@@ -677,8 +676,9 @@ def guess_colorspace(material, img):
         return 'Non-Color' if tex_data['Type'] != 'Diffuse' else 'sRGB'
     return 'Non-Color' if "alb" not in img.name.lower() else 'sRGB'
 
-def guess_shader_and_textures(collection, obj, material, socket_map) -> tuple[str, list[bpy.types.Image]]:
+def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict) -> tuple[str, OrderedDict[bpy.types.Image, str]]:
     """Guess shader type and textures based on the albedo, the object name, and so on."""
+    socket_map = socket_map.copy()
     lc_obname = obj.name.lower()
     lc_matname = material.name.lower()
     lc_dirname = (collection.get('dirname') or "").lower()
@@ -752,6 +752,10 @@ def guess_shader_and_textures(collection, obj, material, socket_map) -> tuple[st
     elif any(["clrmak" in img.name.lower() or "clrmsk" in img.name.lower() for img in all_textures]):
         shader_name = "BotW: Generic NPC"
 
+    if len(obj.data.color_attributes) > 0 and shader_name != "BotW: Material Blend" and len([socket for socket in socket_map.keys() if 'Albedo' in socket]) > 1:
+        shader_name = "BotW: Material Blend"
+        material['WARNING'] = "Using material blend shader because there is a vertex color and >1 albedos."
+
     def order_texture_list(imgs: list[bpy.types.Image]) -> list[bpy.types.Image]:
         order = ["Alb", "AO", "Spm", "Nrm", "Emm", "Fx"]
         return sorted(imgs,
@@ -766,9 +770,12 @@ def guess_shader_and_textures(collection, obj, material, socket_map) -> tuple[st
     guessed_textures = order_texture_list(guessed_textures)
     if guessed_textures:
         material['guessed_textures'] = [img.name for img in guessed_textures]
-    return shader_name, guessed_textures
 
-def hookup_texture_nodes(collection, material, shader_node, all_textures, socket_map) -> bool:
+    socket_map.update({img:guess_socket_name(img, shader_name) for img in guessed_textures})
+
+    return shader_name, socket_map
+
+def hookup_texture_nodes(collection, material, shader_node, socket_map) -> bool:
     nodes = material.node_tree.nodes
     links = material.node_tree.links
 
@@ -777,7 +784,7 @@ def hookup_texture_nodes(collection, material, shader_node, all_textures, socket
     albedo_count = 0
     dye_count = 0
     spm_has_green = False
-    for i, img in enumerate(all_textures):
+    for i, (img, socket_name) in enumerate(socket_map.items()):
         img.colorspace_settings.name = guess_colorspace(material, img)
 
         pixel_image = PixelImage.from_blender_image(img)
@@ -791,12 +798,8 @@ def hookup_texture_nodes(collection, material, shader_node, all_textures, socket
             img_node.width = 400
         img_node.label = img.name
 
-        socket_name = ""
-        if img in socket_map:
-            socket_name = socket_map[img]
         if socket_name in ("", "Unknown"):
             socket_name = guess_socket_name(img, shader_name)
-            img_node.label = "(Guess) " + img_node.label
 
         img_node.location = (-300, i* -300)
 
@@ -834,14 +837,17 @@ def hookup_texture_nodes(collection, material, shader_node, all_textures, socket
             set_socket_value(shader_node, f"Blend 1 Factor", 1)
 
         if len(shader_socket.links) == 0:
-            links.new(img_node.outputs['Color'], shader_socket)
+            if shader_socket.name == 'Alpha' and not is_transparent(material):
+                pass
+            else:
+                links.new(img_node.outputs['Color'], shader_socket)
         else:
             print_later(f"Shader socket already taken: '{material.name}' -> '{img.name}' ({socket_name})")
 
         if is_transparent(material) != False:
             material.surface_render_method = 'BLENDED'
-        # Since transparency doesn't (always) get its own texture node, implicitly hook up the Alpha of the Albedo.
-        if socket_name in ('Albedo', 'Fx Texture Distorted') and pixel_image.has_alpha: # and (img_node.outputs[0].links) > 0 
+        # Since transparency doesn't (always) get its own texture node, hook up the Alpha of the Albedo.
+        if socket_name in ('Albedo', 'Fx Texture Distorted') and pixel_image.has_alpha and is_transparent(material):
             alpha_socket = shader_node.inputs.get('Alpha')
             if alpha_socket and len(alpha_socket.links) == 0 and 'Alpha' in img_node.outputs:
                 links.new(img_node.outputs['Alpha'], alpha_socket)

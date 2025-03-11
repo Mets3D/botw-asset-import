@@ -1,8 +1,5 @@
-# SPDX-FileCopyrightText: 2016-2024 Blender Foundation
-#
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-import bpy
 from bpy.utils import register_class, unregister_class
 import importlib
 
@@ -21,6 +18,7 @@ module_names = (
     "io_anim_seanim",
     "batch_import_seanim",
     "deduplicate_materials",
+    "dae_fixer",
 )
 
 

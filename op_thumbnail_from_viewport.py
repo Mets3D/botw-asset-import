@@ -101,7 +101,7 @@ def asset_thumbnail_from_viewport(context, id, operator=None):
     filepath = os.path.join(bpy.app.tempdir, "asset_preview.png")
     render_result.save_render(filepath)
     temp_img = bpy.data.images.load(filepath)
-    pixel_img = PixelImage.from_blender_image(temp_img)
+    pixel_img = PixelImage.from_blender_image(temp_img, ignore_cache=True)
     pixel_img.crop_to_square_content()
     pixel_img.downscale_to_fit()
     if not id.preview:

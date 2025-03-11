@@ -14,6 +14,7 @@ from .widgets import ensure_widget, get_resources_blend_path
 from .prefs import get_addon_prefs
 from .deduplicate_materials import deduplicate_materials, hash_material
 from .material_data import MATERIAL_DATA, TERRAIN_TEX_NAMES
+from .dae_fixer import fix_dae_uvmaps_in_place
 
 PRINT_LATER = []
 
@@ -113,6 +114,9 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         deduplicate_materials(imported_objects)
         refresh_images()
         bpy.ops.outliner.orphans_purge()
+        
+        # Dump cache, otherwise it's easy to run out of RAM on subsequent imports.
+        PixelImage.cache = {}
 
         return {'FINISHED'}
 
@@ -376,6 +380,7 @@ def import_fbx(context, filepath, discard_types=('MESH', 'EMPTY')):
     return import_dae_or_fbx(context, is_dae=False, filepath=filepath, discard_types=discard_types)
 
 def import_dae(context, filepath, discard_types=('EMPTY')):
+    fix_dae_uvmaps_in_place(filepath)
     return import_dae_or_fbx(context, is_dae=True, filepath=filepath, discard_types=discard_types)
 
 def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = ('EMPTY')):
@@ -473,7 +478,6 @@ def setup_material(collection, obj, material):
                 return
 
     socket_map = load_assigned_textures(material)
-    assigned_textures = [img for img in list(socket_map.keys())]
     shader_name, socket_map = guess_shader_and_textures(collection, obj, material, socket_map)
     shader_node = init_nodetree(material, shader_name)
 
@@ -1268,8 +1272,8 @@ class PixelImage:
     cache = {}
 
     @classmethod
-    def from_blender_image(cls, bpy_img: bpy.types.Image):
-        if bpy_img.name in cls.cache:
+    def from_blender_image(cls, bpy_img: bpy.types.Image, ignore_cache=False):
+        if bpy_img.name in cls.cache and not ignore_cache:
             return cls.cache[bpy_img.name]
 
         # NOTE: Careful! Accessing bpy_img.pixels many times is very slow! Copying all of it once is fast!

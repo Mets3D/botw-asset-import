@@ -109,6 +109,9 @@ def focus_collections(context, collections, focus_view=True, operator=None):
 
     all_colls = collections + child_colls + parent_colls
 
+    for coll in all_colls:
+        coll.hide_viewport = False
+
     for coll in context.scene.collection.children_recursive:
         layer_collection = find_layer_collection_by_collection(
             context.view_layer.layer_collection, coll

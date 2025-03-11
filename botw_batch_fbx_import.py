@@ -478,6 +478,7 @@ def setup_material(collection, obj, material):
     shader_node = init_nodetree(material, shader_name)
 
     if shader_name != 'BotW: Material Blend' and len(obj.data.color_attributes) > 0:
+        material['WARNING'] = "Unused vertex color. This material should probably use Terrain textures blended using the vertex color info."
         print_later(f"UNUSED VERTEX COLOR: {obj.name}")
 
     # Create image nodes, guess UV layer by name, set image color spaces
@@ -512,14 +513,11 @@ def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
     for tex_data in texture_maps:
         name = tex_data['Name']
         if name in ('MaterialAlb', 'MaterialCmb'):
-            # Based on FldObj_MountainLanayru_A_01, it seems that if a MaterialAlb is present in the TextureMaps,
-            # then the terrain maps which will be loaded later (in load_assigned_tile_textures)
-            # should overwrite any preceeding Albedo+Normal combos. Which is pretty crazy and weird. Great.
-            return OrderedDict()
-        img = ensure_loaded_img(tex_data['Name'])
+            continue
+        img = ensure_loaded_img(name)
         if not img:
-            print_later(f"Couldn't find texture: '{material.name}' -> {tex_data['Name']}")
-            missing_tex_from_json.append(tex_data['Name'])
+            print_later(f"Couldn't find texture: '{material.name}' -> {name}")
+            missing_tex_from_json.append(name)
             continue
         type = tex_data['Type'].strip()
 
@@ -592,27 +590,30 @@ def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
     if not shader_data:
         return socket_map
     shader_data = json.loads(shader_data)
-    matparam = shader_data.get('matparam')
-    if not matparam:
-        return socket_map
-    
+
     # texture_array_index has 6 integers between 0-82.
     # These definitely correspond directly to the textures inside content/Terrain,
     # and their order seems to matter too.
-    tex_array_index_props = [value for key, value in matparam.items() if key.startswith('texture_array_index')]
+    matparam = shader_data.get('matparam')
+    tex_array_index_props = []
 
     shaderoptions = shader_data['shaderassign']['options']
-    shader_array_index_props = [value for key, value in shaderoptions.items() if key.startswith('uking_texture_array_texture')]
-    all_default = [v==-1 for v in shader_array_index_props]
+    shader_array_index_props = []
+
+    for i in range(5):
+        # Skipping last value on purpose because it's the same value across the whole game.
+        tex_array_index_props.append(int(matparam[f'texture_array_index{i}']['ValueFloat'][0]))
+        shader_array_index_props.append(shaderoptions[f'uking_texture_array_texture{i}'])
+
+    all_default = all([v==-1 for v in shader_array_index_props])
     tex_indicies = []
-    for i, tex_array_prop in enumerate(tex_array_index_props):
-        if shader_array_index_props[i] == -1 and not all_default:
+    for tex_index_value, shader_array_value in zip(tex_array_index_props, shader_array_index_props):
+        if shader_array_value == -1 and not all_default:
             # If not all ShaderOptions are -1 but this one is,
             # the corresponding terrain texture is not actually used.
             # This most commonly happens for tex_array_prop==0.
             continue
 
-        tex_index_value = int(tex_array_prop['ValueFloat'][0])
         if tex_index_value in tex_indicies:
             continue
         if tex_index_value == 0 and all_default:
@@ -622,13 +623,14 @@ def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
             continue
         tex_indicies.append(tex_index_value)
 
+    if not tex_indicies:
+        return socket_map
+
+    material['tile_textures'] = tex_indicies
+
     alb_offset = 1
     nrm_offset = 1
     for i, tex_index in enumerate(tex_indicies):
-        material['use_tex_blending'] = True
-        material[f'tile_tex{i}'] = tex_index
-        if i > 1:
-            print_later(f"More than two tiling textures: {material.name}")
         albedo = ensure_loaded_img(f"MaterialAlb_Slice_{tex_index}_.png")
         if albedo:
             if 'Albedo' not in list(socket_map.values()):
@@ -641,7 +643,8 @@ def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
             if 'Normal Map' not in list(socket_map.values()):
                 socket_map[normal] = "Normal Map"
                 nrm_offset = 0
-            socket_map[normal] = f'Normal Blend {i+nrm_offset}'
+            else:
+                socket_map[normal] = f'Normal Blend {i+nrm_offset}'
 
     return socket_map
 
@@ -734,7 +737,7 @@ def guess_shader_and_textures(collection, obj, material, socket_map) -> tuple[st
     for prefix in OBJ_PREFIXES:
         if collection['dirname'].startswith(prefix):
             shader_name = "BotW: Smooth Shade"
-    if 'use_tex_blending' in material:
+    if 'tile_textures' in material:
         shader_name = "BotW: Material Blend"
     elif any(["Blade_Fx" in img.name for img in all_textures]):
         if "blade" in lc_matname:
@@ -818,7 +821,7 @@ def hookup_texture_nodes(collection, material, shader_node, all_textures, socket
             if len(shader_socket.links) > 0:
                 if socket_name == 'Albedo':
                     socket_name = 'Albedo Blend 1'
-                elif socket_name == 'Normal':
+                elif socket_name == 'Normal Map':
                     socket_name = 'Normal Blend 1'
                 elif socket_name == 'Albedo Blend 1':
                     socket_name = 'Albedo Blend 2'

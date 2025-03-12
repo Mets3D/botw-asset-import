@@ -1,6 +1,6 @@
 
 TODO:
-    Take bmubin's .dae fix so the roof of TwnObj_HyruleCastle_A_01 has UVs.
+    Root bone should be created on model import, not on anim import.
 
     Load material data on already imported objects to whatever extent possible
         Detect and inspect discrepancies (maybe I can't be arsed tbh)
@@ -8,15 +8,10 @@ TODO:
 
     Motorcycle animation
     Friendly NPCs animation
-    finish TwnObj (there's so much hyrule castle to do and it feels kinda pointless without map data...)
     FldObj
     DgnObj
-    consider the DgnMrgPrt and MergedGrudge stuff but probably ignore them.
 
-    We can probably remove material_data.py from the add-on.
-    We could consider including all the material .json's with the add-on, it's probably not much space.
-    Should include all terrain materials, maybe even mark them as assets.
-        A UDIM set-up for them would be interesting, but I don't really want to rename the files.
+    At the end, check if all terrain materials are included
 
 Things to do with final cleanup script or manual:
     Clean up custom properties like those from cloudrig, idk why they even exist? maybe it's only on the smubin stuff.

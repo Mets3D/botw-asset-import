@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import AddonPreferences
-from bpy.props import StringProperty
+from bpy.props import StringProperty, BoolProperty
 from . import __package__ as base_package
 
 class BotWImportPreferences(AddonPreferences):
@@ -22,6 +22,22 @@ class BotWImportPreferences(AddonPreferences):
         description="If the path to the Bear's Eat animation is this:\nD:\\BotW Extracted\\Animations\\Animal_Bear_Animation\\Eat.seanim\nThen in this box you should browse this:\nD:\\BotW Extracted\\Animations\\"
     )
 
+    rename_collections: BoolProperty(
+        name="Rename Collections",
+        description="Try to make collection names more human-readable using name tables, prefix stripping, and other string operations. Useful when trying to create an asset library, but may be undesired if you want to do further scripting work on the assets. Note that regardless of this option, the original collection name is always stored in a 'file_name' custom property",
+        default=True
+    )
+    rename_objects: BoolProperty(
+        name="Rename Objects",
+        description="Try to make object names more human-readable by discarding default object names of 3D modeling softwares (pCube, pCylinder, etc)",
+        default=True
+    )
+    rename_materials: BoolProperty(
+        name="Rename Materials",
+        description="Try to make material names more human-readable by removing 'Mt_' prefix and prepending the asset name to it",
+        default=True
+    )
+
     def draw(self, context):
         layout = self.layout
         layout.use_property_split = True
@@ -30,6 +46,14 @@ class BotWImportPreferences(AddonPreferences):
         layout.prop(self, 'game_models_folder')
         layout.prop(self, 'game_icons_folder')
         layout.prop(self, 'game_anims_folder')
+
+        layout.separator()
+        row = layout.row()
+        row.alignment = 'LEFT'
+        row.label(text="Rename:")
+        row.prop(self, 'rename_collections', text="", icon='OUTLINER_COLLECTION')
+        row.prop(self, 'rename_objects', text="", icon='OBJECT_DATAMODE')
+        row.prop(self, 'rename_materials', text="", icon='MATERIAL_DATA')
 
 def get_addon_prefs(context=None):
     if not context:

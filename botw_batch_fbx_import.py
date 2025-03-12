@@ -13,8 +13,37 @@ from .collections import ensure_collection, set_active_collection
 from .widgets import ensure_widget, get_resources_blend_path
 from .prefs import get_addon_prefs
 from .deduplicate_materials import deduplicate_materials, hash_material
-from .material_data import MATERIAL_DATA, TERRAIN_TEX_NAMES
 from .dae_fixer import fix_dae_uvmaps_in_place
+
+import time
+from collections import defaultdict
+
+class Timer:
+    instances = []
+
+    def __init__(self, category="N/A", name="Elapsed time"):
+        self.category = category
+        self.name = name
+        self.start = None
+        self.elapsed = 0
+        type(self).instances.append(self)
+
+    def __enter__(self):
+        self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.elapsed = time.perf_counter() - self.start
+        # print(f"{self.name}: {self.elapsed:.2f} seconds")
+
+    @classmethod
+    def summarize(cls):
+        categories = defaultdict(int)
+        for inst in cls.instances:
+            categories[inst.category] += inst.elapsed
+
+        for name, duration in categories.items():
+            print(name, duration)
 
 PRINT_LATER = []
 
@@ -29,6 +58,7 @@ GARBAGE_MATS = ["InsideArea", "InsideMat"]
 
 METAL_ROUGHNESS = 0.6
 
+_shader_data_cache = {}
 _image_path_cache = {}
 def cache_image_paths() -> dict[str, str]:
     """Create a mapping from image names to full filepaths in the Game Models folder."""
@@ -55,7 +85,8 @@ def cache_image_paths() -> dict[str, str]:
 
 def get_image_path(image_name: str) -> str:
     if not _image_path_cache:
-        cache_image_paths()
+        with Timer("Image path cache"):
+            cache_image_paths()
     # Allow passing a full path, why not.
     image_name = Path(image_name).stem
     return _image_path_cache.get(image_name, "")
@@ -101,11 +132,12 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     parent_coll = ensure_collection(context, parent_coll_name)
             for dae_file in dae_files:
                 asset_name = derive_asset_name(dae_file, dirname, len(dae_files)==1)
-                
+
                 if 'Animation' in asset_name:
                     continue
                 filepath = os.path.join(root, dae_file)
-                imported_objects += import_and_setup_single_dae(context, filepath, dae_file, asset_name, parent_coll, counter)
+                with Timer("Full Import", dae_file):
+                    imported_objects += import_and_setup_single_dae(context, filepath, dae_file, asset_name, parent_coll, counter)
             counter += 1
 
         for lateprint in PRINT_LATER:
@@ -114,9 +146,10 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         deduplicate_materials(imported_objects)
         refresh_images()
         bpy.ops.outliner.orphans_purge()
-        
+
         # Dump cache, otherwise it's easy to run out of RAM on subsequent imports.
         PixelImage.cache = {}
+        Timer.summarize()
 
         return {'FINISHED'}
 
@@ -238,16 +271,21 @@ def ensure_world_and_lights(context) -> bpy.types.World:
 def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent_coll, counter=0) -> list[bpy.types.Object]:
     dirname = os.path.basename(os.path.dirname(filepath))
 
+    prefs = get_addon_prefs()
+
     # Create the collection and set it as active so all the objects get imported there to begin with.
     collection = ensure_collection(context, asset_name, parent=parent_coll)
     collection.asset_mark()
     collection['dirname'] = dirname
     collection['asset_name'] = asset_name
     collection['file_name'] = filename.replace(".dae", "")
+    if not prefs.rename_collections:
+        collection.name = collection['file_name']
     set_active_collection(context, collection)
 
-    objs = import_dae(context, filepath, discard_types=('EMPTY'))
-    objs = import_and_merge_fbx_data(context, dae_objs=objs, dae_path=filepath, asset_name=asset_name)
+    with Timer("Import .dae + .fbx", asset_name):
+        objs = import_dae(context, filepath, discard_types=('EMPTY'))
+        objs = import_and_merge_fbx_data(context, dae_objs=objs, dae_path=filepath, asset_name=asset_name)
     if not objs:
         return []
 
@@ -278,28 +316,30 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
                 continue
         elif obj.type == 'MESH':
             orig_name = obj.name
-            if obj.name[-4] == ".":
-                orig_name = obj.name[:-4]
             obj['import_name'] = orig_name
-            if "_Mt_" in obj.name:
-                split = obj.name.split("_Mt_")
-                obj.name = asset_name + "_" + split[0]
+            if prefs.rename_objects:
+                if obj.name[-4] == ".":
+                    orig_name = obj.name[:-4]
+                if "_Mt_" in obj.name:
+                    split = obj.name.split("_Mt_")
+                    obj.name = asset_name + "_" + split[0]
+                    for primitive in PRIMITIVE_NAMES:
+                        if primitive in obj.name:
+                            obj.name = asset_name + "_" + split[1]
+                    if obj.name.endswith("_"):
+                        obj.name = obj.name[:-1]
+                else:
+                    print_later(f"Couldn't rename object: {obj.name}")
                 for primitive in PRIMITIVE_NAMES:
                     if primitive in obj.name:
-                        obj.name = asset_name + "_" + split[1]
-                if obj.name.endswith("_"):
-                    obj.name = obj.name[:-1]
-            else:
-                print_later(f"Couldn't rename object: {obj.name}")
-            for primitive in PRIMITIVE_NAMES:
-                if primitive in obj.name:
-                    obj.name = obj.name.split(primitive)[0]
-            if obj.name.endswith("_Root"):
-                obj.name = obj.name[:-5]
+                        obj.name = obj.name.split(primitive)[0]
+                if obj.name.endswith("_Root"):
+                    obj.name = obj.name[:-5]
 
             for m in obj.modifiers:
                 if m.type == 'ARMATURE' and not m.object:
                     obj.modifiers.remove(m)
+
             for m in obj.data.materials:
                 m['dae_textures'] = dae_textures.get(m['import_name'])
                 json_filepath = os.path.join(json_base_path, collection['file_name'] + "_" + m['import_name'] + ".json")
@@ -358,8 +398,13 @@ def import_and_merge_fbx_data(context, *, dae_objs, dae_path, asset_name):
 
     for fbx_arm in fbx_armatures:
         fbx_arm.name = "RIG-"+asset_name
+
         for pb in fbx_arm.pose.bones:
             pb.custom_shape = ensure_widget('Bone')
+            if "Root" in pb.name:
+                pb.custom_shape = ensure_widget('Root')
+                pb.use_custom_shape_bone_size = False
+                pb.custom_shape_rotation_euler = (-pi/2, 0, 0)
             if pb.name in ("Face_Root"):
                 for child_pb in pb.children_recursive:
                     child_pb.custom_shape_scale_xyz *= 0.1
@@ -367,10 +412,6 @@ def import_and_merge_fbx_data(context, *, dae_objs, dae_path, asset_name):
                 pb.custom_shape_rotation_euler.z = pi/2
             else:
                 pb.custom_shape_rotation_euler.z = -pi/2
-            if "Root" in pb.name:
-                pb.custom_shape = ensure_widget('Root')
-                pb.use_custom_shape_bone_size = False
-                pb.custom_shape_rotation_euler = (-pi/2, 0, 0)
 
     ret_objs += fbx_armatures
     
@@ -453,7 +494,8 @@ def cleanup_mesh(collection, obj, asset_name):
             else:
                 mat.name = new_mat_name
 
-        setup_material(collection, obj, mat)
+        with Timer("Setup material", mat.name):
+            setup_material(collection, obj, mat)
 
 def setup_material(collection, obj, material):
     """A giant function that tries to set up complete materials based on nothing but the single
@@ -486,8 +528,9 @@ def setup_material(collection, obj, material):
     #     print_later(f"UNUSED VERTEX COLOR: {obj.name}")
 
     # Create image nodes, guess UV layer by name, set image color spaces
-    spm_has_green = hookup_texture_nodes(collection, material, shader_node, socket_map)
-    hookup_rgb_nodes(material, shader_node)
+    with Timer("Hookup tex nodes", material.name):
+        spm_has_green = hookup_texture_nodes(collection, material, shader_node, socket_map)
+        hookup_rgb_nodes(material, shader_node)
 
     set_shader_socket_values(collection, obj, material, shader_node, spm_has_green)
     material['hash'] = hash_material(material)
@@ -509,9 +552,9 @@ def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
 
     missing_tex_from_json = []
     tex_from_json = []
-    if 'shader_data' not in material:
+    shader_data = get_shader_data(material)
+    if not shader_data:
         return socket_map
-    shader_data = json.loads(material['shader_data'])
     texture_maps = shader_data["TextureMaps"]
     for tex_data in texture_maps:
         name = tex_data['Name']
@@ -589,10 +632,9 @@ def load_assigned_dae_textures(material) -> OrderedDict[bpy.types.Image, str]:
 def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
     """Based on https://github.com/augmero/bmubin/blob/main/scripts/asset/shader_fixer.py"""
     socket_map = OrderedDict()
-    shader_data = material.get('shader_data')
+    shader_data = get_shader_data(material)
     if not shader_data:
         return socket_map
-    shader_data = json.loads(shader_data)
 
     # texture_array_index has 6 integers between 0-82.
     # These definitely correspond directly to the textures inside content/Terrain,
@@ -792,9 +834,10 @@ def hookup_texture_nodes(collection, material, shader_node, socket_map) -> bool:
         img.colorspace_settings.name = guess_colorspace(material, img)
 
         pixel_image = PixelImage.from_blender_image(img)
-        if pixel_image.is_single_color and socket_name != 'Albedo':
+        if socket_name != 'Albedo' and pixel_image.is_single_color:
             # If the whole image is just one color, use an RGB node instead.
             img_node = nodes.new(type="ShaderNodeRGB")
+            print(img.name)
             img_node.outputs[0].default_value = pixel_image.pixels_rgba[0]
         else:
             img_node = nodes.new(type="ShaderNodeTexImage")
@@ -851,7 +894,7 @@ def hookup_texture_nodes(collection, material, shader_node, socket_map) -> bool:
         if is_transparent(material) != False:
             material.surface_render_method = 'BLENDED'
         # Since transparency doesn't (always) get its own texture node, hook up the Alpha of the Albedo.
-        if socket_name in ('Albedo', 'Fx Texture Distorted') and pixel_image.has_alpha and is_transparent(material):
+        if socket_name in ('Albedo', 'Fx Texture Distorted') and is_transparent(material) and pixel_image.has_alpha:
             alpha_socket = shader_node.inputs.get('Alpha')
             if alpha_socket and len(alpha_socket.links) == 0 and 'Alpha' in img_node.outputs:
                 links.new(img_node.outputs['Alpha'], alpha_socket)
@@ -1062,13 +1105,33 @@ def ensure_UV_node(material, img_node, shader_name):
                 set_socket_value(pingpong_node, 'PingPong Y', True)
             links.new(pingpong_node.outputs[0], img_node.inputs[0])
 
+def get_shader_data(material):
+    """Tried to optimize json loading by caching but it's insignificant."""
+    global _shader_data_cache
+    if material.name not in _shader_data_cache and 'shader_data' in material:
+        _shader_data_cache[material.name] = json.loads(material['shader_data'])
+    return _shader_data_cache[material.name]
+
 def get_tex_data(material, img) -> dict:
-    if 'shader_data' in material:
-        shader_data = json.loads(material['shader_data'])
-        if 'TextureMaps' in shader_data:
-            tex_maps = shader_data['TextureMaps']
-            return next((t for t in tex_maps if t['Name'] == Path(img.filepath).stem), {})
-    return {}
+    shader_data = get_shader_data(material)
+    tex_maps = shader_data['TextureMaps']
+    return next((t for t in tex_maps if t['Name'] == Path(img.filepath).stem), {})
+
+def get_alpha_mode(material) -> str:
+    """This is unfortunately not useful.
+    The game uses the same Alpha blend mode for decals and objects with transparent edges; AlphaMask.
+    But in Blender, decals must be set to Blended, and other objects to Dithered, otherwise decals would 
+    get black z-fighting artifacts, and other objects would be weirdly translucent.
+
+    I just go with BLENDED because decals are more common. :(
+    """
+    shader_data = get_shader_data(material)
+    alpha_flag = shader_data['MaterialU']['RenderState']['_flags']
+    
+    zelda_blend_modes = ['Custom', 'Opaque', 'AlphaMask', 'Translucent']
+    blend_mode = zelda_blend_modes[alpha_flag]
+
+    return 'BLENDED' if blend_mode == 'Translucent' else 'DITHERED'
 
 def texture_uses_first_uvmap(material, img) -> bool or None:
     """So, there's no guaranteed way to easily guess if a texture uses the 2nd UVMap,
@@ -1080,7 +1143,9 @@ def texture_uses_first_uvmap(material, img) -> bool or None:
     if not tex_data:
         return True
     tex_idx = tex_data['textureUnit'] - 1
-    shader_data = json.loads(material['shader_data'])
+    shader_data = get_shader_data(material)
+    if not shader_data:
+        return None
     shader_options = shader_data['shaderassign']['options']
     # For TotK, this might have to be `o_texture{tex_idx}_texcoord``, but I never tried.
     uv_idx = shader_options.get(f'uking_texture{tex_idx}_texcoord')
@@ -1115,21 +1180,21 @@ def hookup_rgb_nodes(material, shader_node):
 
 def get_color_values(material) -> list[Vector]:
     colors = []
-    if 'shader_data' in material:
-        shader_data = json.loads(material['shader_data'])
-        for name, data in shader_data['matparam'].items():
-            if name.startswith("const_color"):
-                vec = Vector((data['ValueFloat']))
-                vec.normalize()
-                if vec[0] != vec[1] != vec[2]:
-                    colors.append(vec)
+    shader_data = get_shader_data(material)
+    if not shader_data:
+        return colors
+    for name, data in shader_data['matparam'].items():
+        if name.startswith("const_color"):
+            vec = Vector((data['ValueFloat']))
+            vec.normalize()
+            if vec[0] != vec[1] != vec[2]:
+                colors.append(vec)
     return colors
 
 def is_transparent(material) -> bool or None:
-    if 'shader_data' not in material:
+    shader_data = get_shader_data(material)
+    if not shader_data:
         return None
-
-    shader_data = json.loads(material['shader_data'])
     return shader_data['isTransparent']
 
 def ensure_loaded_img(img_name):
@@ -1276,21 +1341,28 @@ class PixelImage:
         if bpy_img.name in cls.cache and not ignore_cache:
             return cls.cache[bpy_img.name]
 
-        # NOTE: Careful! Accessing bpy_img.pixels many times is very slow! Copying all of it once is fast!
-        pixels = bpy_img.pixels[:]
-        width = bpy_img.size[0]
-        height = bpy_img.size[1]
-
-        instance = cls(width, height, pixels)
+        instance = cls()
+        instance.width = bpy_img.size[0]
+        instance.height = bpy_img.size[1]
+        instance.bpy_img = bpy_img
         cls.cache[bpy_img.name] = instance
 
         return instance
 
-    def __init__(self, width, height, pixels):
-        pixels = pixels[:]
-        self.width = width
-        self.height = height
-        self.pixels_rgba = [tuple(pixels[i:i+4]) for i in range(0, len(pixels), 4)]
+    @classmethod
+    def from_pixels(cls, width, height, pixels):
+        instance = cls()
+        instance.width = width
+        instance.height = height
+        instance.pixels = pixels
+        return instance
+
+    def __init__(self):
+        self.bpy_img = None
+        self.width = 0
+        self.height = 0
+        self._pixels = []
+        self.pixels_rgba = []
 
     def crop_to_square_content(self):
         """
@@ -1384,6 +1456,14 @@ class PixelImage:
 
     @property
     def pixels_rgba(self):
+        if not self._pixels_rgba:
+            with Timer("Pixel cache", self.bpy_img.name if self.bpy_img else ""):
+                # NOTE: Careful! Accessing bpy_img.pixels is very slow! Do this only when needed!
+                if self.bpy_img:
+                    pixels = self.bpy_img.pixels[:]
+                else:
+                    pixels = self._pixels
+                self._pixels_rgba = [tuple(pixels[i:i+4]) for i in range(0, len(pixels), 4)]
         return self._pixels_rgba
 
     @pixels_rgba.setter

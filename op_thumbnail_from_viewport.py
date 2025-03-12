@@ -76,7 +76,7 @@ class ASSET_OT_crop_asset_thumbnails(bpy.types.Operator):
 def crop_asset_preview(id):
     if not id.preview:
         return
-    pixel_img = PixelImage(id.preview.image_size[0], id.preview.image_size[1], id.preview.image_pixels_float[:])
+    pixel_img = PixelImage.from_pixels(id.preview.image_size[0], id.preview.image_size[1], id.preview.image_pixels_float[:])
     pixel_img.crop_to_square_content()
     pixel_img.downscale_to_fit()
     id.preview.image_size = pixel_img.width, pixel_img.height

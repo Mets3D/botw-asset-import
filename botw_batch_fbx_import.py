@@ -55,6 +55,7 @@ DYES = ["Default", "Blue", "Red", "Yellow", "White", "Black", "Purple", "Green",
 OBJ_PREFIXES = ["Obj_", "TwnObj_", "TwnObjVillage_", "FldObj_", "DgnObj_", "DgnMrgPrt_"]
 PRIMITIVE_NAMES = ["_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane", "pSolid"]
 GARBAGE_MATS = ["InsideArea", "InsideMat"]
+TEX_SUFFIXES = ["_Alb", "_Spm", "_Nrm", "_Emm", "_Emm", "_Clr", "_Mtl"]
 
 METAL_ROUGHNESS = 0.6
 
@@ -415,14 +416,14 @@ def import_and_merge_fbx_data(context, *, dae_objs, dae_path, asset_name):
             if "Root" in pb.name:
                 pb.custom_shape = ensure_widget('Root')
                 pb.use_custom_shape_bone_size = False
-                pb.custom_shape_rotation_euler = (-pi/2, 0, 0)
-            if pb.name in ("Face_Root"):
-                for child_pb in pb.children_recursive:
-                    child_pb.custom_shape_scale_xyz *= 0.1
-            if any([pb.name.endswith(suf) for suf in ("_R", "_FR", "_BR", "_R_1", "_R_2")]):
-                pb.custom_shape_rotation_euler.z = pi/2
+                if pb.name in ("Face_Root"):
+                    for child_pb in pb.children_recursive:
+                        child_pb.custom_shape_scale_xyz *= 0.1
             else:
-                pb.custom_shape_rotation_euler.z = -pi/2
+                if any([pb.name.endswith(suf) for suf in ("_R", "_FR", "_BR", "_R_1", "_R_2")]):
+                    pb.custom_shape_rotation_euler.z = 0
+                else:
+                    pb.custom_shape_rotation_euler.z = -pi
 
     ret_objs += fbx_armatures
     
@@ -617,7 +618,10 @@ def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
     for type, img in tex_from_json:
         # NOTE: Can add support for more shader socket names here.
         if type == 'Diffuse':
-            socket_map[img] = "Albedo"
+            if "_Red_Alb" in img.name:
+                socket_map[img] = "Skin Red Albedo"
+            else:
+                socket_map[img] = "Albedo"
         elif type == 'Alpha':
             socket_map[img] = "Alpha"
         elif type == 'Specular':
@@ -760,6 +764,24 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
                 if "_alb" in img.name.lower():
                     albedo = img
 
+    def increment_name(name: str, increment=1, default_zfill=1) -> str:
+        # Increment LAST number in the name.
+        # Negative numbers will be clamped to 0.
+        # Digit length will be preserved, so 10 will decrement to 09.
+        # 99 will increment to 100, not 00.
+
+        # If no number was found, one will be added at the end of the base name.
+        # The length of this in digits is set with the `default_zfill` param.
+
+        numbers_in_name = re.findall(r'\d+', name)
+        if not numbers_in_name:
+            return name + str(max(0, increment)).zfill(default_zfill)
+
+        last = numbers_in_name[-1]
+        incremented = str(max(0, int(last) + increment)).zfill(len(last))
+        split = name.rsplit(last, 1)
+        return incremented.join(split)
+
     # Find all other textures with the same base name.
     guessed_textures = []
     if albedo:
@@ -768,6 +790,10 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
         textureset_name = collection['dirname']
     for img_name, _filepath in _image_path_cache.items():
         if img_name.startswith(textureset_name):
+            extra_name_part = img_name[len(textureset_name):]
+            if not any([extra_name_part.startswith(suf) for suf in TEX_SUFFIXES]):
+                # This avoids things like "Bear" ending up with textures of "Beard" and such mis-matches.
+                continue
             if "eye" in img_name.lower() and "eye" not in textureset_name.lower():
                 # This avoids eg. animals using their eye textures for the body material.
                 continue
@@ -1178,7 +1204,8 @@ def hookup_rgb_nodes(material, shader_node):
     if len(color_nodes) > 0:
         # If there's at least one proper color constant, 
         # there's a very solid chance for it to be emmission color.
-        if 'Emission Color' in shader_node.inputs:
+        # (But only if an emission mask is already plugged in, otherwise it must be somehting else.)
+        if 'Emission Color' in shader_node.inputs and len(shader_node.inputs['Emission Mask'].links) > 0:
             is_albedo = False
             if 'Albedo' in shader_node.inputs:
                 albedo_socket = shader_node.inputs['Albedo']

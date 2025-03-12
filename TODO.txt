@@ -1,10 +1,10 @@
 
 TODO:
-    Root bone should be created on model import, not on anim import.
-
     Load material data on already imported objects to whatever extent possible
         Detect and inspect discrepancies (maybe I can't be arsed tbh)
         Would probably be best to simply re-do all non-cel-shaded objects. Should have virtually no clean-up necessary anymore and have better results than ever. Just a matter of waiting and clicking. Maybe. I think. Oh, and combining sets, fuck. But that could arguably be automated as well, maybe... hmm... But besides, it would be best to load such things from mubin data... which we could do indirectly by first getting bmubin to write it all into a big json for us.
+        
+        
 
     Motorcycle animation
     Friendly NPCs animation
@@ -52,17 +52,22 @@ Things to do with final cleanup script or manual:
     Make sure SPM and Nrm textures are non-color and Alb are sRGB (although check first). Some Emm are sRGB and some aren't, so leave those alone.
     Nuke all text datablocks, or maybe add a ReadMe.
 
-Things I had to fix manually:
-    Korok albedo colors since they're procedurally done
-    Some eye materials that didn't get detected as eye materials at first (now they should, but I didn't want to re-import.)
+Things I had to fix/do manually:
+    Asset previews and catalogs
+    Korok materials since they're procedural in-game
     Barbarian set skin paint
-    Moblin Mask's mesh actually exports slightly borked, some pieces are on the floor, huh.
-    Similar deal with one of the generic Zora children, they had their body jewelry on the floor.
+    Some meshes imported with some pieces weirdly on the floor:
+        Moblin Mask
+        Zora children (and maybe adults too, I forget)
     For generic NPC meshes, set albedo tints for the materials.
     A lot of work on assembly of Hylian NPC heads.
     A lot of work on enemy materials, and setting up re-skins as separate assets with shared mesh data.
-    Some animals had the wrong textures hooked up. Was later improved in the import code.
-    Some town objects import with a 90 degree X rotation.
+    For many of Link's animations, the facial animation was separate from the body, so I merged them. (Sometimes the same facial anim is used for multiple body anims, in this case I duplicated the face anim and merged into each body anim)
+    Was later improved in import code:
+        Decal materials needed their Blend mode set to Blended.
+        Some animals had the wrong textures hooked up.
+        Some eye materials that didn't get detected as eye materials.
+
 
 Could be fun to make a leaves particle system using FlowerFallenLeavesAlb_Slice_0_.png etc
 

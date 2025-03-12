@@ -399,6 +399,17 @@ def import_and_merge_fbx_data(context, *, dae_objs, dae_path, asset_name):
     for fbx_arm in fbx_armatures:
         fbx_arm.name = "RIG-"+asset_name
 
+        if 'Root' not in fbx_arm.data.bones:
+            # Root bone needs to exist for animations to work.
+            context.view_layer.objects.active = fbx_arm
+            bpy.ops.object.mode_set(mode='EDIT')
+            root = fbx_arm.data.edit_bones.new(name="Root")
+            root.tail.y = 1
+            for eb in fbx_arm.data.edit_bones:
+                if not eb.parent and eb != root:
+                    eb.parent = root
+            bpy.ops.object.mode_set(mode='OBJECT')
+
         for pb in fbx_arm.pose.bones:
             pb.custom_shape = ensure_widget('Bone')
             if "Root" in pb.name:

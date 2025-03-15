@@ -1,6 +1,6 @@
 import bpy
 from bpy.props import BoolProperty
-from bpy.types import Collection, LayerCollection
+from .utils.collections import find_layer_collection_by_collection
 
 # TODO: support objects!
 
@@ -40,8 +40,6 @@ class ASSETBROWSER_OT_focus_asset(bpy.types.Operator):
         if action:
             focus_action(context, action, self.focus_view)
             self.report({'INFO'}, f"Focus Action: {context.asset.name}")
-
-        # bpy.ops.file.view_selected()
 
         if collections or action:
             return {'FINISHED'}
@@ -140,7 +138,8 @@ def focus_view_on_objects(context, objects):
         except RuntimeError:
             # If the object cannot be selected for any reason, whatever, it's not that important.
             pass
-    focus_selected_objects(context)
+    focus_view_on_objects_without_ops(context, objects)
+    # focus_selected_objects(context)
     # Restore selection
     for obj in objects:
         obj.select_set(False)
@@ -162,17 +161,44 @@ def focus_selected_objects(context):
         bpy.ops.object.mode_set(mode=org_mode)
     context.area.ui_type = org_area
 
-def find_layer_collection_by_collection(
-    layer_collection: LayerCollection, collection: Collection
-) -> LayerCollection | None:
-    if collection == layer_collection.collection:
-        return layer_collection
+def focus_view_on_objects_without_ops(context, objects=[]):
+    """This tries to replicate bpy.ops.view3d.view_selected()
+    and it's necessary because that operator refuses to work with context.temp_override(),
+    which means executing it from any editor other than the 3D View doesn't work.
+    And we need it to work from the asset browser.
+    An alternative was to switch the asset browser to a 3D View temporarily,
+    but this resulted in losing the scrollbar position (it resets to the top).
+    """
+    # Get the current 3D View region and space data
+    area = next(a for a in context.screen.areas if a.type == 'VIEW_3D')
+    region_3d = area.spaces.active.region_3d
 
-    # go recursive
-    for child in layer_collection.children:
-        layer_collection = find_layer_collection_by_collection(child, collection)
-        if layer_collection:
-            return layer_collection
+    # Get the selected object(s)
+    if not objects:
+        objects = context.selected_objects
+
+    if not objects:
+        return
+
+    # Calculate the bounding box of all selected objects
+    min_bound = [float('inf'), float('inf'), float('inf')]
+    max_bound = [-float('inf'), -float('inf'), -float('inf')]
+    
+    for obj in objects:
+        for co in obj.bound_box:
+            for i in range(3):  # X, Y, Z
+                min_bound[i] = min(min_bound[i], co[i])
+                max_bound[i] = max(max_bound[i], co[i])
+
+    # Calculate the center of the bounding box
+    center = [(min_bound[i] + max_bound[i]) / 2 for i in range(3)]
+
+    # Adjust the view to center on the bounding box center
+    region_3d.view_location = center  # Move the view's center to the selected object center
+
+    # Optionally, adjust the view distance for zooming out/in based on the bounding box size
+    size = max(max_bound[i] - min_bound[i] for i in range(3))  # Largest dimension of the bounding box
+    region_3d.view_distance = size * 1.65  # Zoom out a little to fit the selected object(s) in view
 
 registry = [ASSETBROWSER_OT_focus_asset]
 

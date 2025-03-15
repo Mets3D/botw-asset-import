@@ -1,19 +1,16 @@
 
 TODO:
-    Load material data on already imported objects to whatever extent possible
-        Detect and inspect discrepancies (maybe I can't be arsed tbh)
-        Would probably be best to simply re-do all non-cel-shaded objects. Should have virtually no clean-up necessary anymore and have better results than ever. Just a matter of waiting and clicking. Maybe. I think. Oh, and combining sets, fuck. But that could arguably be automated as well, maybe... hmm... But besides, it would be best to load such things from mubin data... which we could do indirectly by first getting bmubin to write it all into a big json for us.
-        
-        
-
     Motorcycle animation
     Friendly NPCs animation
     FldObj
     DgnObj
 
+    Delete those FldObj and TwnObj which were un-marked as asset, since I deemed these too difficult/janky to use in an asset library style workflow.
+
     At the end, check if all terrain materials are included
 
 Things to do with final cleanup script or manual:
+    Make all asset collections hide_viewport=False
     Clean up custom properties like those from cloudrig, idk why they even exist? maybe it's only on the smubin stuff.
     Hide InsideMat objects from viewport and render, and remove material or assign an Invisible material.
     Crop asset thumbnails with the operator.

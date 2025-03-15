@@ -1,4 +1,4 @@
-import bpy, hashlib
+import hashlib
 
 def deduplicate_materials(objects):
     """Crunch relevant data into a hash, then user remap if this hash already existed."""

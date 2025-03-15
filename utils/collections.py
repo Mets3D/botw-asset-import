@@ -39,6 +39,19 @@ def recursive_search_layer_collection(
             return found
 
 
+def find_layer_collection_by_collection(
+    layer_collection: LayerCollection, collection: Collection
+) -> LayerCollection | None:
+    if collection == layer_collection.collection:
+        return layer_collection
+
+    # go recursive
+    for child in layer_collection.children:
+        layer_collection = find_layer_collection_by_collection(child, collection)
+        if layer_collection:
+            return layer_collection
+
+
 def set_active_collection(context, collection: Collection):
     layer_coll = context.view_layer.layer_collection
 

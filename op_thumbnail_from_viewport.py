@@ -2,6 +2,7 @@ import bpy, os
 from .op_focus_asset import focus_action, focus_collections
 from bpy.props import BoolProperty
 from .botw_batch_fbx_import import PixelImage
+from .utils.progressbar import ProgressBar
 
 class ASSET_OT_thumbnail_from_viewport(bpy.types.Operator):
     """Create an asset preview from a viewport render."""
@@ -26,28 +27,53 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     focus_each: BoolProperty(name="Focus Each", default=True, description="Focus the viewport on each asset before making the preview render.")
+    progress_bar: BoolProperty(name="Show Progress", description="Drawing a progress bar requires re-drawing the entire UI, which slows down the process by about 10%", default=True)
 
     @classmethod
     def poll(cls, context):
         if hasattr(context, 'id'):
             return bool(context.id)
 
-    def execute(self, context):
-        for id in context.selected_ids[:]:
-            if type(id) == bpy.types.Action:
-                if self.focus_each:
-                    context.scene.frame_current = int(id.curve_frame_range.length/2)
-                result = focus_action(context, id, self.focus_each)
-                if result == {'CANCELLED'}:
-                    # This can happen is the rig is not visible.
-                    continue
-            elif type(id) == bpy.types.Collection:
-                if self.focus_each:
-                    focus_collections(context, [id], self.focus_each, self)
+    def modal(self, context, event):
+        self.pb.update(context, self.index)
+        self.render_thumbnail(context, self.ids[self.index])
+        self.index += 1
+        
+        if self.index > len(self.ids)-1:
+            self.pb.destroy()
+            return {'FINISHED'}
+        else:
+            return {'PASS_THROUGH'}
 
-            asset_thumbnail_from_viewport(context, id, self)
+    def invoke(self, context, event):
+        if not self.progress_bar:
+            return self.execute(context)
+        self.pb = ProgressBar(len(context.selected_ids))
+        context.window_manager.modal_handler_add(self)
+        self.ids = context.selected_ids[:]
+        self.index = 0
+
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        for id in context.selected_ids:
+            self.render_thumbnail(context, id)
 
         return {'FINISHED'}
+
+    def render_thumbnail(self, context, id):
+        if type(id) == bpy.types.Action:
+            if self.focus_each:
+                context.scene.frame_current = int(id.curve_frame_range.length/2)
+            result = focus_action(context, id, self.focus_each)
+            if result == {'CANCELLED'}:
+                # This can happen is the rig is not visible.
+                return result
+        elif type(id) == bpy.types.Collection:
+            if self.focus_each:
+                focus_collections(context, [id], self.focus_each, self)
+
+        asset_thumbnail_from_viewport(context, id)
 
 class ASSET_OT_crop_asset_thumbnails(bpy.types.Operator):
     """Create an asset preview from a viewport render for all selected assets."""

@@ -4,11 +4,11 @@ from bpy.utils import register_class, unregister_class
 import importlib
 
 module_names = (
+    "matcap",
+    "utils",
     "botw_batch_fbx_import",
-    "collections",
     "asset_names",
     "widgets",
-    "matcap",
     "prefs",
     "op_actions_merge",
     "op_armature_merge",
@@ -17,7 +17,6 @@ module_names = (
     "op_thumbnail_from_viewport",
     "io_anim_seanim",
     "batch_import_seanim",
-    "deduplicate_materials",
     "dae_fixer",
 )
 

@@ -1,6 +1,7 @@
 import bpy
 from bpy.props import BoolProperty
 from .utils.collections import find_layer_collection_by_collection
+from mathutils import Vector
 
 # TODO: support objects!
 
@@ -128,77 +129,98 @@ def focus_collections(context, collections, focus_view=True, operator=None):
 
     return {'FINISHED'}
 
-def focus_view_on_objects(context, objects):
-    org_selected = context.selected_objects[:]
-    for obj in org_selected:
-        obj.select_set(False)
-    for obj in objects:
-        try:
-            obj.select_set(True)
-        except RuntimeError:
-            # If the object cannot be selected for any reason, whatever, it's not that important.
-            pass
-    focus_view_on_objects_without_ops(context, objects)
-    # focus_selected_objects(context)
-    # Restore selection
-    for obj in objects:
-        obj.select_set(False)
-    for obj in org_selected:
-        obj.select_set(True)
-
-def focus_selected_objects(context):
-    org_mode = context.active_object.mode if context.active_object else 'OBJECT'
-    if org_mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-    area = next(a for a in context.screen.areas if a.type == 'VIEW_3D')
-    region = next(r for r in area.regions if r.type=='WINDOW')
-    org_area = context.area.ui_type
-    context.area.ui_type = 'VIEW_3D'
-    context.area.tag_redraw()
-    with context.temp_override(area=area, region=region):
-        bpy.ops.view3d.view_selected()
-    if org_mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode=org_mode)
-    context.area.ui_type = org_area
-
-def focus_view_on_objects_without_ops(context, objects=[]):
-    """This tries to replicate bpy.ops.view3d.view_selected()
-    and it's necessary because that operator refuses to work with context.temp_override(),
-    which means executing it from any editor other than the 3D View doesn't work.
-    And we need it to work from the asset browser.
-    An alternative was to switch the asset browser to a 3D View temporarily,
-    but this resulted in losing the scrollbar position (it resets to the top).
-    """
-    # Get the current 3D View region and space data
-    area = next(a for a in context.screen.areas if a.type == 'VIEW_3D')
-    region_3d = area.spaces.active.region_3d
-
-    # Get the selected object(s)
+def focus_view_on_objects(context, objects=[]):
     if not objects:
         objects = context.selected_objects
+    fit_view3d_to_coords(context, *get_bbox_3d(objects))
 
-    if not objects:
+def fit_view3d_to_coords(context, center, coords):
+    depsgraph = context.evaluated_depsgraph_get()
+    area = next(a for a in context.screen.areas if a.type == 'VIEW_3D')
+    if not area:
         return
+    space_data = area.spaces.active
+    region_3d = space_data.region_3d
+    use_temp_cam = False
+    camera = None
+    if region_3d.view_perspective == 'CAMERA' and space_data.lock_camera:
+        if space_data.use_local_camera:
+            camera = space_data.camera
+        else:
+            camera = context.scene.camera
+    if not camera:
+        use_temp_cam = True
+        org_cam = context.scene.camera
+        cam_data = bpy.data.cameras.new(name="temp_cam")
+        if region_3d.view_perspective == 'ORTHO':
+            cam_data.type = 'ORTHO'
+        cam_data.sensor_width = 72
+        cam_data.lens = space_data.lens
 
+        camera = bpy.data.objects.new("temp_cam", object_data=cam_data)
+        camera.matrix_world = region_3d.view_matrix.inverted()
+        context.scene.collection.objects.link(camera)
+        context.scene.camera = camera
+        region_3d.view_perspective = 'CAMERA'
+
+    coords = [co for corner in coords for co in corner]
+    camera.location, ortho_scale = camera.camera_fit_coords(depsgraph, coords)
+    if camera.data.type == 'ORTHO':
+        camera.data.ortho_scale = ortho_scale
+
+    context.view_layer.update()
+
+    if use_temp_cam:
+        region_3d.view_perspective = 'PERSP'
+        cam_matrix = camera.matrix_world.inverted()
+        distance = (camera.matrix_world.translation - center).length
+        region_3d.view_distance = distance
+        bpy.data.objects.remove(camera)
+        bpy.data.cameras.remove(cam_data)
+        region_3d.view_matrix = cam_matrix
+        context.scene.camera = org_cam
+
+def get_bbox_3d(objects) -> tuple[Vector, list[Vector]]:
+    """Return combined transformed bounding box center and 8 corners in world space."""
     # Calculate the bounding box of all selected objects
     min_bound = [float('inf'), float('inf'), float('inf')]
     max_bound = [-float('inf'), -float('inf'), -float('inf')]
     
     for obj in objects:
-        for co in obj.bound_box:
+        for co in get_world_bounding_box(obj):
             for i in range(3):  # X, Y, Z
                 min_bound[i] = min(min_bound[i], co[i])
                 max_bound[i] = max(max_bound[i], co[i])
 
     # Calculate the center of the bounding box
-    center = [(min_bound[i] + max_bound[i]) / 2 for i in range(3)]
+    center = Vector([(min_bound[i] + max_bound[i]) / 2 for i in range(3)])
 
-    # Adjust the view to center on the bounding box center
-    region_3d.view_location = center  # Move the view's center to the selected object center
+    # Get the 3D View's region and region_3d data
+    # Project the corners to 2D screen space
+    corners = [
+        Vector((min_bound[0], min_bound[1], min_bound[2])),
+        Vector((min_bound[0], min_bound[1], max_bound[2])),
+        Vector((min_bound[0], max_bound[1], min_bound[2])),
+        Vector((min_bound[0], max_bound[1], max_bound[2])),
+        Vector((max_bound[0], min_bound[1], min_bound[2])),
+        Vector((max_bound[0], min_bound[1], max_bound[2])),
+        Vector((max_bound[0], max_bound[1], min_bound[2])),
+        Vector((max_bound[0], max_bound[1], max_bound[2])),
+    ]
 
-    # Optionally, adjust the view distance for zooming out/in based on the bounding box size
-    size = max(max_bound[i] - min_bound[i] for i in range(3))  # Largest dimension of the bounding box
-    region_3d.view_distance = size * 1.65  # Zoom out a little to fit the selected object(s) in view
+    return center, corners
+
+def get_world_bounding_box(obj) -> list[Vector]:
+    """Returns the world-space coordinates of an object's bounding box."""
+    if obj is None:
+        return None
+
+    # Get the 8 local-space bounding box corners
+    local_bbox_corners = [Vector(corner) for corner in obj.bound_box]
+    # Convert to world space using matrix_world
+    world_bbox_corners = [obj.matrix_world @ corner for corner in local_bbox_corners]
+    
+    return world_bbox_corners
 
 registry = [ASSETBROWSER_OT_focus_asset]
 

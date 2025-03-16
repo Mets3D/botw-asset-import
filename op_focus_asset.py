@@ -2,6 +2,7 @@ import bpy
 from bpy.props import BoolProperty
 from .utils.collections import find_layer_collection_by_collection
 from mathutils import Vector
+from .utils.timer import Timer
 
 # TODO: support objects!
 
@@ -125,7 +126,8 @@ def focus_collections(context, collections, focus_view=True, operator=None):
         objs = []
         for coll in collections:
             objs += coll.all_objects
-        focus_view_on_objects(context, objs)
+        with Timer("Focus View"):
+            focus_view_on_objects(context, objs)
 
     return {'FINISHED'}
 
@@ -135,7 +137,6 @@ def focus_view_on_objects(context, objects=[]):
     fit_view3d_to_coords(context, *get_bbox_3d(objects))
 
 def fit_view3d_to_coords(context, center, coords):
-    depsgraph = context.evaluated_depsgraph_get()
     area = next(a for a in context.screen.areas if a.type == 'VIEW_3D')
     if not area:
         return
@@ -151,19 +152,21 @@ def fit_view3d_to_coords(context, center, coords):
     if not camera:
         use_temp_cam = True
         org_cam = context.scene.camera
-        cam_data = bpy.data.cameras.new(name="temp_cam")
+        org_persp = region_3d.view_perspective
+        cam_data = bpy.data.cameras.new(name="temp_Camera")
         if region_3d.view_perspective == 'ORTHO':
             cam_data.type = 'ORTHO'
         cam_data.sensor_width = 72
         cam_data.lens = space_data.lens
 
-        camera = bpy.data.objects.new("temp_cam", object_data=cam_data)
+        camera = bpy.data.objects.new("temp_Camera", object_data=cam_data)
         camera.matrix_world = region_3d.view_matrix.inverted()
         context.scene.collection.objects.link(camera)
         context.scene.camera = camera
         region_3d.view_perspective = 'CAMERA'
 
     coords = [co for corner in coords for co in corner]
+    depsgraph = context.evaluated_depsgraph_get()
     camera.location, ortho_scale = camera.camera_fit_coords(depsgraph, coords)
     if camera.data.type == 'ORTHO':
         camera.data.ortho_scale = ortho_scale
@@ -171,10 +174,14 @@ def fit_view3d_to_coords(context, center, coords):
     context.view_layer.update()
 
     if use_temp_cam:
-        region_3d.view_perspective = 'PERSP'
+        region_3d.view_perspective = org_persp
         cam_matrix = camera.matrix_world.inverted()
         distance = (camera.matrix_world.translation - center).length
-        region_3d.view_distance = distance
+        if org_persp == 'ORTHO':
+            region_3d.view_distance = camera.data.ortho_scale * space_data.lens / 72
+        else:
+            region_3d.view_distance = distance
+
         bpy.data.objects.remove(camera)
         bpy.data.cameras.remove(cam_data)
         region_3d.view_matrix = cam_matrix
@@ -182,7 +189,6 @@ def fit_view3d_to_coords(context, center, coords):
 
 def get_bbox_3d(objects) -> tuple[Vector, list[Vector]]:
     """Return combined transformed bounding box center and 8 corners in world space."""
-    # Calculate the bounding box of all selected objects
     min_bound = [float('inf'), float('inf'), float('inf')]
     max_bound = [-float('inf'), -float('inf'), -float('inf')]
     
@@ -195,8 +201,7 @@ def get_bbox_3d(objects) -> tuple[Vector, list[Vector]]:
     # Calculate the center of the bounding box
     center = Vector([(min_bound[i] + max_bound[i]) / 2 for i in range(3)])
 
-    # Get the 3D View's region and region_3d data
-    # Project the corners to 2D screen space
+    # Construct the 8 bounding box corners from the min/max X/Y/Z coords.
     corners = [
         Vector((min_bound[0], min_bound[1], min_bound[2])),
         Vector((min_bound[0], min_bound[1], max_bound[2])),
@@ -212,9 +217,6 @@ def get_bbox_3d(objects) -> tuple[Vector, list[Vector]]:
 
 def get_world_bounding_box(obj) -> list[Vector]:
     """Returns the world-space coordinates of an object's bounding box."""
-    if obj is None:
-        return None
-
     # Get the 8 local-space bounding box corners
     local_bbox_corners = [Vector(corner) for corner in obj.bound_box]
     # Convert to world space using matrix_world

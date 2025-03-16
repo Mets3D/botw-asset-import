@@ -3,6 +3,7 @@ from .op_focus_asset import focus_action, focus_collections
 from bpy.props import BoolProperty
 from .botw_batch_fbx_import import PixelImage
 from .utils.progressbar import ProgressBar
+from .utils.timer import Timer
 
 class ASSET_OT_thumbnail_from_viewport(bpy.types.Operator):
     """Create an asset preview from a viewport render."""
@@ -35,15 +36,17 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
             return bool(context.id)
 
     def modal(self, context, event):
-        self.pb.update(context, self.index)
-        self.render_thumbnail(context, self.ids[self.index])
-        self.index += 1
-        
-        if self.index > len(self.ids)-1:
-            self.pb.destroy()
-            return {'FINISHED'}
-        else:
-            return {'PASS_THROUGH'}
+        with Timer("Thumbnail everything"):
+            self.pb.update(context, self.index)
+            self.render_thumbnail(context, self.ids[self.index])
+            self.index += 1
+            
+            if self.index > len(self.ids)-1:
+                self.pb.destroy()
+                Timer.summarize()
+                return {'FINISHED'}
+            else:
+                return {'PASS_THROUGH'}
 
     def invoke(self, context, event):
         if not self.progress_bar:
@@ -56,7 +59,9 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
     def execute(self, context):
-        for id in context.selected_ids:
+        total = len(context.selected_ids)
+        for i, id in enumerate(context.selected_ids):
+            print(f"Thumbnail {i}/{total}")
             self.render_thumbnail(context, id)
 
         return {'FINISHED'}
@@ -71,9 +76,11 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
                 return result
         elif type(id) == bpy.types.Collection:
             if self.focus_each:
-                focus_collections(context, [id], self.focus_each, self)
+                with Timer("Focus collections"):
+                    focus_collections(context, [id], self.focus_each, self)
 
-        asset_thumbnail_from_viewport(context, id)
+        with Timer("Thumnail render"):
+            asset_thumbnail_from_viewport(context, id)
 
 class ASSET_OT_crop_asset_thumbnails(bpy.types.Operator):
     """Create an asset preview from a viewport render for all selected assets."""
@@ -116,7 +123,8 @@ def asset_thumbnail_from_viewport(context, id, operator=None):
             overlays_bkp = area.spaces.active.overlay.show_overlays
             area.spaces.active.overlay.show_overlays = False
             break
-    bpy.ops.render.opengl()
+    with Timer("OpenGL Render"):
+        bpy.ops.render.opengl()
     area.spaces.active.overlay.show_overlays = overlays_bkp
     render_result = next(image for image in bpy.data.images if image.type == "RENDER_RESULT")
     if not render_result:
@@ -124,17 +132,18 @@ def asset_thumbnail_from_viewport(context, id, operator=None):
             operator.report({'ERROR'}, "Couldn't find Render Result image.")
         return {'CANCELLED'}
 
-    filepath = os.path.join(bpy.app.tempdir, "asset_preview.png")
-    render_result.save_render(filepath)
-    temp_img = bpy.data.images.load(filepath)
-    pixel_img = PixelImage.from_blender_image(temp_img, ignore_cache=True)
-    pixel_img.crop_to_square_content()
-    pixel_img.downscale_to_fit()
-    if not id.preview:
-        id.preview_ensure()
-    id.preview.image_size = pixel_img.width, pixel_img.height
-    id.preview.image_pixels_float = pixel_img.pixels
-    bpy.data.images.remove(temp_img)
+    with Timer("Process Thumbnail"):
+        filepath = os.path.join(bpy.app.tempdir, "asset_preview.png")
+        render_result.save_render(filepath)
+        temp_img = bpy.data.images.load(filepath)
+        pixel_img = PixelImage.from_blender_image(temp_img, ignore_cache=True)
+        pixel_img.crop_to_square_content()
+        pixel_img.downscale_to_fit()
+        if not id.preview:
+            id.preview_ensure()
+        id.preview.image_size = pixel_img.width, pixel_img.height
+        id.preview.image_pixels_float = pixel_img.pixels
+        bpy.data.images.remove(temp_img)
 
     if operator:
         operator.report({'INFO'}, "Success.")

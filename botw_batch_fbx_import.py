@@ -433,7 +433,7 @@ def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = (
             for m in ob.data.materials:
                 if 'import_name' not in m:
                     orig_name = m.name
-                    if orig_name[-4] == ".":
+                    if len(orig_name) > 4 and orig_name[-4] == ".":
                         orig_name = orig_name[:-4]
                     m['import_name'] = orig_name
                 m.name += suffix

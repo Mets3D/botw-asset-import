@@ -11,13 +11,15 @@ module_names = (
     "widgets",
     "prefs",
     "op_actions_merge",
-    "op_armature_merge",
+    "op_armature_constrain_outfit",
+    "op_armature_merge_outfit",
     "op_focus_asset",
     "op_rename_asset",
     "op_thumbnail_from_viewport",
     "io_anim_seanim",
     "batch_import_seanim",
     "dae_fixer",
+    "ui_asset_metadata",
 )
 
 

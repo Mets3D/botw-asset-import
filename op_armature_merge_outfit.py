@@ -1,11 +1,11 @@
 import bpy
 
 
-class OBJECT_OT_botw_armature_merge(bpy.types.Operator):
-    """Merge armatures into one, merging duplicate bones."""
+class OBJECT_OT_armature_merge_outfit(bpy.types.Operator):
+    """Merge armatures into one by merging shared bones."""
 
-    bl_idname = "object.botw_merge_armatures"
-    bl_label = "BotW: Merge Armatures"
+    bl_idname = "object.armature_merge_outfit"
+    bl_label = "Merge Outfit Armatures"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -41,11 +41,11 @@ class OBJECT_OT_botw_armature_merge(bpy.types.Operator):
 
         return {'FINISHED'}
 
-registry = [OBJECT_OT_botw_armature_merge]
+registry = [OBJECT_OT_armature_merge_outfit]
 
 def draw_armature_merge(self, context):
     if context.active_object and context.active_object.type == 'ARMATURE':
-        self.layout.operator(OBJECT_OT_botw_armature_merge.bl_idname)
+        self.layout.operator(OBJECT_OT_armature_merge_outfit.bl_idname)
 
 def register():
     bpy.types.VIEW3D_MT_object.append(draw_armature_merge)

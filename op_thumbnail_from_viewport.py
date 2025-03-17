@@ -28,7 +28,7 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     focus_each: BoolProperty(name="Focus Each", default=True, description="Focus the viewport on each asset before making the preview render.")
-    progress_bar: BoolProperty(name="Show Progress", description="Drawing a progress bar requires re-drawing the entire UI, which slows down the process by about 10%", default=True)
+    use_progress_bar: BoolProperty(name="Show Progress", description="Drawing a progress bar requires re-drawing the entire UI, which slows down the process by about 10%", default=True)
 
     @classmethod
     def poll(cls, context):
@@ -49,9 +49,9 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
                 return {'PASS_THROUGH'}
 
     def invoke(self, context, event):
-        if not self.progress_bar:
+        if not self.use_progress_bar:
             return self.execute(context)
-        self.pb = ProgressBar(len(context.selected_ids))
+        self.pb = ProgressBar(len(context.selected_ids), menu=bpy.types.ASSETBROWSER_MT_editor_menus)
         context.window_manager.modal_handler_add(self)
         self.ids = context.selected_ids[:]
         self.index = 0

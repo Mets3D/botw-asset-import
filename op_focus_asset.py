@@ -3,6 +3,7 @@ from bpy.props import BoolProperty
 from .utils.collections import find_layer_collection_by_collection
 from mathutils import Vector
 from .utils.timer import Timer
+from .ui_asset_metadata import get_asset_library
 
 # TODO: support objects!
 
@@ -29,19 +30,25 @@ class ASSETBROWSER_OT_focus_asset(bpy.types.Operator):
             focus_collections(context, collections, self.focus_view, self)
             self.report({'INFO'}, f"Focused {len([collections])} collection(s)")
 
+        asset = context.asset
         action = None
         if type(context.id) == bpy.types.Action:
             action = context.id
-        elif context.asset and hasattr(context.asset, 'id_type') and context.asset.id_type == 'ACTION':
+        elif asset and hasattr(asset, 'id_type') and asset.id_type == 'ACTION':
             import_method = context.area.spaces.active.params.import_method
             if import_method == 'FOLLOW_PREFS':
-                import_method = context.preferences.filepaths.asset_library_import_method
+                asset_library = get_asset_library(context, asset)
+                if asset_library:
+                    import_method = asset_library.import_method
+                else:
+                    # This is only if asset_library is None, which should never happen.
+                    import_method = 'APPEND'
             link = import_method == 'LINK'
-            action = get_or_import_action(context.asset.name, context.asset.full_library_path, link=link)
+            action = get_or_import_action(asset.name, asset.full_library_path, link=link)
 
         if action:
-            focus_action(context, action, self.focus_view)
-            self.report({'INFO'}, f"Focus Action: {context.asset.name}")
+            focus_action(context, action, self.focus_view and action.library)
+            self.report({'INFO'}, f"Focus Action: {asset.name}")
 
         if collections or action:
             return {'FINISHED'}

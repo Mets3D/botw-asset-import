@@ -117,8 +117,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             print(lateprint)
 
         deduplicate_materials(imported_objects)
-        refresh_images()
         bpy.ops.outliner.orphans_purge()
+        refresh_images()
 
         # Dump cache, otherwise it's easy to run out of RAM on subsequent imports.
         PixelImage.cache = {}
@@ -1044,9 +1044,10 @@ def create_helper_nodes(collection, material, img_node, pixel_image, socket_name
             uv_node = link.from_node
             links.remove(link)
             if len(uv_node.outputs[0].links) == 0:
-                from_node = uv_node.outputs[0].links[0].from_node
-                if from_node:
-                    nodes.remove(from_node)
+                if len(uv_node.inputs[0].links) > 0:
+                    from_node = uv_node.inputs[0].links[0].from_node
+                    if from_node:
+                        nodes.remove(from_node)
                 nodes.remove(uv_node)
         links.new(scroll_node.outputs[0], img_node.inputs[0])
         if 'guardian' in lc_assetname or 'ancient' in lc_assetname:

@@ -2,10 +2,6 @@
 TODO:
     Motorcycle animation
     Friendly NPCs animation
-    FldObj
-    DgnObj
-
-    Delete those FldObj and TwnObj which were un-marked as asset, since I deemed these too difficult/janky to use in an asset library style workflow.
 
     At the end, check if all terrain materials are included
 

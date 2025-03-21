@@ -26,7 +26,7 @@ class PixelImage:
         instance = cls()
         instance.width = width
         instance.height = height
-        instance.pixels = pixels
+        instance._pixels = pixels
         return instance
 
     def __init__(self):
@@ -72,30 +72,34 @@ class PixelImage:
         # Determine the square size
         square_size = max(content_width, content_height)
 
-        # Expand the bounding box to make it square
-        extra_w = (square_size - content_width) // 2
-        extra_h = (square_size - content_height) // 2
+        for i in range(max(0, square_size - self.width)):
+            for row in pixel_rows:
+                row.append((0, 0, 0, 0))
+        extra_height = max(0, square_size - self.height)
+        for y in range(extra_height):
+            pixel_rows.append([(0, 0, 0, 0) for x in range(max(self.width, square_size))])
 
-        start_x = min_x - extra_w
-        end_x = start_x + square_size
-        if end_x > self.width or start_x < 0:
-            return
+        pad_x = int((square_size - content_width)/2)
+        start_x = min_x - int(pad_x/2)
+        if start_x < 0:
+            pad_x += -start_x
+            start_x = 0
+        end_x = start_x + square_size + pad_x
 
-        start_y = min_y - extra_h
-        end_y = start_y + square_size
-        if end_y > self.height or min_y < 0:
-            return
+        pad_y = int((square_size - content_height)/2)
+        start_y = min_y - pad_y
+        if start_y < 0:
+            pad_y += -start_y
+            start_y = 0
+        end_y = start_y + square_size + pad_y
 
         # Extract the square pixels
         cropped_grid = [row[start_x:end_x] for row in pixel_rows[start_y:end_y]]
 
         # Update image data
-        self.width = square_size
-        self.height = square_size
+        self.width = end_x - start_x
+        self.height = end_y - start_y
         pixels_rgba = [pixel for row in cropped_grid for pixel in row]
-        if len(pixels_rgba) < square_size*square_size:
-            # Pad empty pixels if we're missing any to fill out the full square with data.
-            pixels_rgba += [(0, 0, 0, 0)] * (square_size*square_size - len(pixels_rgba))
         self.pixels_rgba = pixels_rgba
 
     def downscale_to_fit(self, max_size=256):

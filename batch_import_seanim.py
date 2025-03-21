@@ -62,8 +62,12 @@ class SCENE_OT_import_batch_seanim(bpy.types.Operator):
                             actions.append(existing_action)
                             continue
                         fullpath = os.path.join(asset_anim_folder, entry)
-                        print("Loading anim: ", fullpath)
                         action = load_seanim(context, filepath=fullpath)
+                        if not action:
+                            print("Failed to load anim: ", fullpath)
+                            continue
+                        else:
+                            print("Loaded anim: ", fullpath)
                         action.name = asset_name + ": " + action.name
                         action.asset_mark()
                         actions.append(action)

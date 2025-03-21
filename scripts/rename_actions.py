@@ -1,6 +1,6 @@
 import bpy
 
-REMOVE = ["Default_", "Demo_", "Act_", "Normal_", "Common_", "Gd_General_", "GdQueen_", "Npc_TripMaster_", "Npc_Hylia_Johnny_", "Npc_Escort_", "Npc_King_Vagrant_", "UC_M_", "Npc_Shiekah_Heir_", "Npc_Shiekah_Artist_", "AncientDoctor_Hateno_", "Npc_Rito_Teba_", "Minister_", "UR_M_", "Move_"]
+REMOVE = ["Default_", "Demo_", "Act_", "Normal_", "Common_", "Gd_General_", "GdQueen_", "Npc_TripMaster_", "Npc_Hylia_Johnny_", "Npc_Escort_", "Npc_King_Vagrant_", "UC_M_", "Npc_Shiekah_Heir_", "Npc_Shiekah_Artist_", "AncientDoctor_Hateno_", "Npc_Rito_Teba_", "Minister_", "UR_M_", "Move_", "Test_"]
 
 SWAPS = {
     'SitGround' : 'Ground',

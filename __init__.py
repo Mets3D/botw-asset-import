@@ -20,6 +20,7 @@ module_names = (
     "batch_import_seanim",
     "dae_fixer",
     "ui_asset_metadata",
+    "cleanup",
 )
 
 

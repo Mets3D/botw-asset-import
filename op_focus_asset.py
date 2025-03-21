@@ -47,7 +47,10 @@ class ASSETBROWSER_OT_focus_asset(bpy.types.Operator):
             action = get_or_import_action(asset.name, asset.full_library_path, link=link)
 
         if action:
-            focus_action(context, action, self.focus_view and action.library)
+            result = focus_action(context, action, self.focus_view)
+            if result == {'CANCELLED'}:
+                self.report({'ERROR'}, "Failed to focus action: " + action.name)
+                return {'CANCELLED'}
             self.report({'INFO'}, f"Focus Action: {asset.name}")
 
         if collections or action:
@@ -79,6 +82,7 @@ def focus_action(context, action, focus_view=True):
     for pb in rig.pose.bones:
         pb.matrix_basis.identity()
     rig.animation_data.action = action
+    rig.animation_data.action_slot = rig.animation_data.action_suitable_slots[0]
     context.scene.frame_start = int(action.curve_frame_range.x)
     context.scene.frame_end = int(action.curve_frame_range.y)
 
@@ -141,6 +145,8 @@ def focus_collections(context, collections, focus_view=True, operator=None):
 def focus_view_on_objects(context, objects=[]):
     if not objects:
         objects = context.selected_objects
+    fit_view3d_to_coords(context, *get_bbox_3d(objects))
+    # This worked fine until Blender 4.4, but now it needs to be ran twice...!
     fit_view3d_to_coords(context, *get_bbox_3d(objects))
 
 def fit_view3d_to_coords(context, center, coords):

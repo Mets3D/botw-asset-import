@@ -35,6 +35,7 @@ def get_or_create_collection(collection_name):
     collection = bpy.data.collections.get(collection_name)
     if not collection:
         collection = bpy.data.collections.new(name=collection_name)
+        collection.hide_viewport = True
         print("New coll: ", collection.name)
     return collection
 

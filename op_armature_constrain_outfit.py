@@ -1,4 +1,5 @@
 import bpy
+from bpy.props import EnumProperty
 
 class OBJECT_OT_armature_constrain(bpy.types.Operator):
     """Constrain matching bones of selected armatures to that of the active armature. Useful for applying appropriately rigged outfits."""
@@ -6,6 +7,13 @@ class OBJECT_OT_armature_constrain(bpy.types.Operator):
     bl_idname = "object.armature_outfit_constraint"
     bl_label = "Constrain Outfit Armature"
     bl_options = {'REGISTER', 'UNDO'}
+
+    space: EnumProperty(
+        name="Space", 
+        items=[
+            ('WORLD', 'World', "Copy the transforms of matching bones in world space"),
+            ('LOCAL', 'Local', "Copy the transforms of matching bones in local space"),
+        ])
 
     @classmethod
     def poll(cls, context):
@@ -36,6 +44,11 @@ class OBJECT_OT_armature_constrain(bpy.types.Operator):
                         con = pb.constraints.new(type='COPY_TRANSFORMS')
                         con.target = active_arm
                         con.subtarget = pb.name
+                        con.owner_space = con.target_space = self.space
+                        if self.space == 'LOCAL' and pb.name == 'Skl_Root':
+                            target_pb = active_arm.pose.bones.get(pb.name)
+                            if target_pb:
+                                con.influence = pb.bone.head.z / target_pb.bone.head.z
 
         self.report({'INFO'}, f"Constrained {counter}/{sum([len(a.pose.bones) for a in selected_armatures if a != active_arm])} bones.")
         return {'FINISHED'}

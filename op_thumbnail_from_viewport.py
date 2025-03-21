@@ -38,7 +38,10 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
     def modal(self, context, event):
         with Timer("Thumbnail everything"):
             self.pb.update(context, self.index)
-            self.render_thumbnail(context, self.ids[self.index])
+            result = self.render_thumbnail(context, self.ids[self.index])
+            if result == {'CANCELLED'}:
+                self.report({'ERROR'}, "Failed to render thumbnail. (For Actions, select an Armature)")
+                return result
             self.index += 1
             
             if self.index > len(self.ids)-1:
@@ -62,7 +65,9 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
         total = len(context.selected_ids)
         for i, id in enumerate(context.selected_ids):
             print(f"Thumbnail {i}/{total}")
-            self.render_thumbnail(context, id)
+            result = self.render_thumbnail(context, id)
+            if result == {'CANCELLED'}:
+                self.report({'ERROR'}, "Failed to generate preview for " + id.name)
 
         return {'FINISHED'}
 
@@ -113,7 +118,6 @@ def crop_asset_preview(id):
     pixel_img.crop_to_square_content()
     pixel_img.downscale_to_fit()
     id.preview.image_size = pixel_img.width, pixel_img.height
-    print("width: ", pixel_img.width, "height: ", pixel_img.height, "pixels: ", len(pixel_img.pixels))
     id.preview.image_pixels_float = pixel_img.pixels
 
 def asset_thumbnail_from_viewport(context, id, operator=None):
@@ -141,8 +145,11 @@ def asset_thumbnail_from_viewport(context, id, operator=None):
         pixel_img.downscale_to_fit()
         if not id.preview:
             id.preview_ensure()
-        id.preview.image_size = pixel_img.width, pixel_img.height
-        id.preview.image_pixels_float = pixel_img.pixels
+        id.preview.image_size = [min(256, pixel_img.width), min(256, pixel_img.height)]
+        try:
+            id.preview.image_pixels_float = pixel_img.pixels
+        except ValueError as exc:
+            print("Failed to assign image: ", exc)
         bpy.data.images.remove(temp_img)
 
     if operator:

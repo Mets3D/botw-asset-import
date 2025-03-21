@@ -76,11 +76,12 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     bl_label = "Import BotW .dae + .fbx"
     bl_options = {'REGISTER', 'UNDO'}
 
-    directory: StringProperty(name="Folder Path", subtype='DIR_PATH')
+    directory: bpy.props.StringProperty(subtype='FILE_PATH', options={'SKIP_SAVE', 'HIDDEN'})
 
     def execute(self, context):
         global PRINT_LATER
         PRINT_LATER = []
+
         if not self.directory:
             self.report({'WARNING'}, "No folder selected")
             return {'CANCELLED'}

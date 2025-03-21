@@ -1,11 +1,34 @@
 
 TODO:
-    Motorcycle animation
-    Friendly NPCs animation
+    4.4 food for thought:
+        - Could slotted actions be used somehow? Does any import or clean-up code need tweaking?
+            - Yes, they say action.fcurves will be nuked in 5.0 https://developer.blender.org/docs/release_notes/4.4/python_api/#deprecated
+        - Should we Tris to Quads anything, or just come up with an operator that finds the best settings (least remaining triangles)?
+        - New Glare compositing node, should check if we can make it look better.
+        - Check the asset browser's ability to sort by catalog, sounds useful for showcasing it and should probably be set in the files.
+        - Set my startup file to export to h.265?
 
-    At the end, check if all terrain materials are included
+    Named NPCs' animations (in Char_ file for now, which is handy for making shader tweaks)
+        Hylians (Done)
+        Goron (Done)
+        Gerudo
+        Zora
+        Rito
+    Motorcycle animations
+
+    Linkle (separate upload)
+    Zelda (separate upload)
+    Mipha (separate upload)
+    Girly animations?
+
+    Make sure to include all terrain textures.
+    It would be wise to split it up into more files so people can better choose what they want to download and what they don't. (eg. a file for all foliage, one for all ruins, etc) But more scope.
+
+    There's a bug in the image cropping if the image starts with a bunch of empty rows, idk.
 
 Things to do with final cleanup script or manual:
+    Should really add per-object and/or per-material shading controls (expose more sockets or add more Attribute nodes or both) for the rimlights especially.
+    It looks like a bunch of animations don't have properly groupped fcurves (see Goron Child: Common_Sleep)
     Make all asset collections hide_viewport=False
     Clean up custom properties like those from cloudrig, idk why they even exist? maybe it's only on the smubin stuff.
     Hide InsideMat objects from viewport and render, and remove material or assign an Invisible material.
@@ -56,6 +79,7 @@ Things I had to fix/do manually:
     A lot of work on assembly of Hylian NPC heads.
     A lot of work on enemy materials, and setting up re-skins as separate assets with shared mesh data.
     For many of Link's animations, the facial animation was separate from the body, so I merged them. (Sometimes the same facial anim is used for multiple body anims, in this case I duplicated the face anim and merged into each body anim)
+    Horse items' icons for some reason didn't extract from the game, so I grabbed them from the internet.
     Was later improved in import code:
         Decal materials needed their Blend mode set to Blended.
         Some animals had the wrong textures hooked up.

@@ -43,15 +43,13 @@ class PixelImage:
         """
         if not self.pixels_rgba:
             return  # No pixels to process
-        
-        w, h = self.width, self.height
 
         # Convert 1D pixel list into a 2D list (rows of pixels)
-        pixel_rows = [self.pixels_rgba[i * w:(i + 1) * w] for i in range(h)]
+        pixel_rows = [self.pixels_rgba[h * self.width:(h+1) * self.width] for h in range(self.height)]
 
         # Find the bounding box of non-transparent pixels
-        min_x, max_x = w, 0
-        min_y, max_y = h, 0
+        min_x, max_x = self.width, 0
+        min_y, max_y = self.height, 0
 
         for y, row in enumerate(pixel_rows):
             for x, pixel in enumerate(row):
@@ -78,11 +76,15 @@ class PixelImage:
         extra_w = (square_size - content_width) // 2
         extra_h = (square_size - content_height) // 2
 
-        start_x = max(0, min_x - extra_w)
-        end_x = min(w, start_x + square_size)
+        start_x = min_x - extra_w
+        end_x = start_x + square_size
+        if end_x > self.width or start_x < 0:
+            return
 
-        start_y = max(0, min_y - extra_h)
-        end_y = min(h, start_y + square_size)
+        start_y = min_y - extra_h
+        end_y = start_y + square_size
+        if end_y > self.height or min_y < 0:
+            return
 
         # Extract the square pixels
         cropped_grid = [row[start_x:end_x] for row in pixel_rows[start_y:end_y]]
@@ -101,25 +103,27 @@ class PixelImage:
         Downscale the image so that its width and height do not exceed max_size.
         The aspect ratio is preserved.
         """
-        if self.width <= max_size and self.height <= max_size:
-            return  # No need to downscale
 
-        # Compute scale factor (preserving aspect ratio)
-        scale_factor = min(max_size / self.width, max_size / self.height)
-        new_width = max(1, math.floor(self.width * scale_factor))
-        new_height = max(1, math.floor(self.height * scale_factor))
+        if self.width == 0 or self.height == 0:
+            return
+        scale = min([max_size / self.width, max_size / self.height])
+
+        if scale > 1:
+            return
+
+        new_width = int(self.width * scale)
+        new_height = int(self.height * scale)
 
         # Downscale using nearest-neighbor sampling
         downsampled_pixels = []
         for y in range(new_height):
-            orig_y = int(y / scale_factor)
+            orig_y = int(y / scale)
             for x in range(new_width):
-                orig_x = int(x / scale_factor)
+                orig_x = int(x / scale)
                 downsampled_pixels.append(self.pixels_rgba[orig_y * self.width + orig_x])
 
         # Update image properties
-        self.width = new_width
-        self.height = new_height
+        self.width, self.height = new_width, new_height
         self.pixels_rgba = downsampled_pixels
 
     @property

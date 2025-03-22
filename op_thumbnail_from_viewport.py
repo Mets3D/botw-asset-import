@@ -111,14 +111,15 @@ class ASSET_OT_crop_asset_thumbnails(bpy.types.Operator):
             bpy.data.images[0].name = bpy.data.images[0].name
         return {'FINISHED'}
 
-def crop_asset_preview(id):
+def crop_asset_preview(id) -> bool:
     if not id.preview:
-        return
+        return False
     pixel_img = PixelImage.from_pixels(id.preview.image_size[0], id.preview.image_size[1], id.preview.image_pixels_float[:])
-    pixel_img.crop_to_square_content()
+    success = pixel_img.crop_to_square_content()
     pixel_img.downscale_to_fit()
     id.preview.image_size = pixel_img.width, pixel_img.height
     id.preview.image_pixels_float = pixel_img.pixels
+    return success
 
 def asset_thumbnail_from_viewport(context, id, operator=None):
     overlays_bkp = True

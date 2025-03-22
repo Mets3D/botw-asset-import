@@ -36,13 +36,13 @@ class PixelImage:
         self._pixels = []
         self.pixels_rgba = []
 
-    def crop_to_square_content(self):
+    def crop_to_square_content(self) -> bool:
         """
         Crops the image to a square by removing empty rows/columns while 
         ensuring the final image remains square. Useful for asset thumbnails.
         """
         if not self.pixels_rgba:
-            return  # No pixels to process
+            return False  # No pixels to process
 
         # Convert 1D pixel list into a 2D list (rows of pixels)
         pixel_rows = [self.pixels_rgba[h * self.width:(h+1) * self.width] for h in range(self.height)]
@@ -63,7 +63,7 @@ class PixelImage:
         if max_x < min_x or max_y < min_y:
             self.width = self.height = 0
             self.pixels_rgba = []
-            return
+            return False
 
         # Calculate the bounding box width and height
         content_width = max_x - min_x
@@ -72,7 +72,7 @@ class PixelImage:
         # Determine the square size
         square_size = max(content_width, content_height)
         if square_size == self.width:
-            return
+            return False
 
         for i in range(max(0, square_size - self.width)):
             for row in pixel_rows:
@@ -103,6 +103,7 @@ class PixelImage:
         self.height = square_size
         pixels_rgba = [pixel for row in pixel_rows for pixel in row]
         self.pixels_rgba = pixels_rgba
+        return True
 
     def downscale_to_fit(self, max_size=256):
         """

@@ -50,9 +50,16 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
             link_bone_widgets(context)
         if self.clean_animations:
             for a in bpy.data.actions:
-                remove_negative_frames(a)
-                remove_redundant_keyframes(a)
-                fix_groups(a)
+                removed_count = remove_negative_frames(a)
+                removed_count += remove_redundant_keyframes(a)
+                fixed = fix_groups(a)
+                msg = ""
+                if removed_count:
+                    msg += f"Removed {removed_count} keyframes."
+                if fixed:
+                    msg += f"fixed {fixed} missing groups."
+                if msg:
+                    print(f"Cleaned {a.name}: {msg}")
         if self.organize_by_catalogs:
             asset_catalogs_to_scene_collection(context)
         if self.rename_actions:
@@ -83,9 +90,12 @@ def crop_asset_previews():
         for asset in container:
             if not asset.asset_data:
                 continue
-            if not asset.library and not asset.override_library and asset.asset_data:
-                print("Crop: ", asset.name)
-                crop_asset_preview(asset)
+            if not asset.library and not asset.override_library and asset.asset_data and asset.preview:
+                orig_size = asset.preview.image_size[0]
+                success = crop_asset_preview(asset)
+                new_size = asset.preview.image_size[0]
+                if success:
+                    print("Cropped:", asset.name, orig_size, new_size)
 
 def rename_actions():
     REMOVE = ["Default_", "Demo_", "Act_", "Normal_", "Common_", "Gd_General_", "GdQueen_", "Npc_TripMaster_", "Npc_Hylia_Johnny_", "Npc_Escort_", "Npc_King_Vagrant_", "UC_M_", "Npc_Shiekah_Heir_", "Npc_Shiekah_Artist_", "AncientDoctor_Hateno_", "Npc_Rito_Teba_", "Minister_", "UR_M_", "Move_", "Test_"]
@@ -146,9 +156,11 @@ def rename_ids():
                 id.name = new_name
             
     for obj in bpy.data.objects:
+        if obj.library or obj.override_library:
+            continue
         if obj.data:
             obj.data.name = obj.name
-        if hasattr(obj.data, 'shape_keys'):
+        if hasattr(obj.data, 'shape_keys') and obj.data.shape_keys:
             obj.data.shape_keys.name = obj.name
 
 def ensure_lighting():
@@ -181,6 +193,8 @@ def remove_custom_props():
             for bad_prop in bad_props:
                 if bad_prop in thing:
                     del thing[bad_prop]
+    for prop in list(bpy.context.scene.keys()):
+        del bpy.context.scene[prop]
 
 def reveal_all_collections(context):
     for c in bpy.data.collections:

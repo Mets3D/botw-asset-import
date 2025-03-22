@@ -8,9 +8,19 @@ TODO:
         maybe add ReadMe's.
     Should really add per-object and/or per-material shading controls (expose more sockets or add more Attribute nodes or both) for the rimlights especially.
 
+    Batch .seanim import should set action slot names to the active rig's name
+
     Cleanup
-        Anim
-            Generic NPCs (DONE)
+        (ALL DONE) Anim
+            Generic NPCs
+            Animals
+            Enemies
+            Named NPCs
+            Link
+        Char
+        Obj
+        resources
+        BlankFile
 
     Linkle (separate upload)
     Zelda (separate upload)
@@ -20,7 +30,7 @@ TODO:
     Make sure to include all terrain textures.
     It would be wise to split it up into more files so people can better choose what they want to download and what they don't. (eg. a file for all foliage, one for all ruins, etc) But more scope.
 
-    There's a bug in the image cropping if the image starts with a bunch of empty rows, idk.
+    Should update the Kena and Witcher 3 asset libraries as well, if they even need to be updated, but probably yes. For example, I don't think I marked Kena animations as assets, but might as well.
 
 Cleanup.py DONE
     Objects
@@ -40,10 +50,11 @@ Cleanup.py DONE
         Remove keyframes at negative frames (usually default pose is keyed at frame -1)
         Remove fcurves that are always keyed on default value (even if we end up removing partial transforms, like only Y rotation)
         Remove useless bits from Action names
+    Asset Data
+        Improve names of objects, collections
+        Make all asset collections hide_viewport=False
+        Crop asset thumbnails
 
-    Improve names of objects, collections
-    Make all asset collections hide_viewport=False
-    Crop asset thumbnails
     Set lights consistently
     Report if any library is not from a neighbouring file
     Report any image nodes with no image

@@ -66,11 +66,13 @@ class PixelImage:
             return
 
         # Calculate the bounding box width and height
-        content_width = max_x - min_x + 1
-        content_height = max_y - min_y + 1
+        content_width = max_x - min_x
+        content_height = max_y - min_y
 
         # Determine the square size
         square_size = max(content_width, content_height)
+        if square_size == self.width:
+            return
 
         for i in range(max(0, square_size - self.width)):
             for row in pixel_rows:
@@ -79,27 +81,27 @@ class PixelImage:
         for y in range(extra_height):
             pixel_rows.append([(0, 0, 0, 0) for x in range(max(self.width, square_size))])
 
-        pad_x = int((square_size - content_width)/2)
-        start_x = min_x - int(pad_x/2)
-        if start_x < 0:
-            pad_x += -start_x
-            start_x = 0
-        end_x = start_x + square_size + pad_x
-
-        pad_y = int((square_size - content_height)/2)
-        start_y = min_y - pad_y
-        if start_y < 0:
-            pad_y += -start_y
-            start_y = 0
-        end_y = start_y + square_size + pad_y
-
         # Extract the square pixels
-        cropped_grid = [row[start_x:end_x] for row in pixel_rows[start_y:end_y]]
+        pixel_rows = [row[min_x:max_x] for row in pixel_rows[min_y:max_y]]
+
+        row_of_nothing = [(0, 0, 0, 0) for x in range(len(pixel_rows[0]))]
+        for i in range(square_size-content_height):
+            if i % 2 == 0:
+                pixel_rows.insert(0, row_of_nothing)
+            else:
+                pixel_rows.append(row_of_nothing)
+
+        for i in range(square_size-content_width):
+            for row in pixel_rows:
+                if i % 2 == 0:
+                    row.insert(0, (0, 0, 0, 0))
+                else:
+                    row.append((0, 0, 0, 0))
 
         # Update image data
-        self.width = end_x - start_x
-        self.height = end_y - start_y
-        pixels_rgba = [pixel for row in cropped_grid for pixel in row]
+        self.width = square_size
+        self.height = square_size
+        pixels_rgba = [pixel for row in pixel_rows for pixel in row]
         self.pixels_rgba = pixels_rgba
 
     def downscale_to_fit(self, max_size=256):
@@ -110,9 +112,11 @@ class PixelImage:
 
         if self.width == 0 or self.height == 0:
             return
+        if self.width <= max_size and self.height <= max_size:
+            return
         scale = min([max_size / self.width, max_size / self.height])
 
-        if scale > 1:
+        if scale >= 1:
             return
 
         new_width = int(self.width * scale)

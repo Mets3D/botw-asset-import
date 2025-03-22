@@ -1,7 +1,8 @@
 import bpy, os
 from bpy.props import EnumProperty, BoolProperty, StringProperty
 from .prefs import get_addon_prefs
-from .io_anim_seanim.import_seanim import load_seanim, remove_redundant_keyframes
+from .io_anim_seanim.import_seanim import load_seanim
+from .utils.action import remove_redundant_keyframes
 from .asset_names import asset_names
 from math import pi
 
@@ -68,6 +69,7 @@ class SCENE_OT_import_batch_seanim(bpy.types.Operator):
                             continue
                         else:
                             print("Loaded anim: ", fullpath)
+                        remove_redundant_keyframes(action)
                         action.name = asset_name + ": " + action.name
                         action.asset_mark()
                         actions.append(action)

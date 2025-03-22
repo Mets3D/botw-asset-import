@@ -97,32 +97,6 @@ def load(context, files, filepath="", operator=None):
         # Print when all files have been imported
         progress.leave_substeps("Finished!")
 
-def remove_redundant_keyframes(action, threshold=1e-6):
-    """
-    Removes redundant keyframes from all F-Curves in the active action.
-    A keyframe is considered redundant if it has the same value as its neighbors within a given threshold.
-    """
-    for fcurve in action.fcurves:
-        if not fcurve.keyframe_points:
-            continue
-        
-        keyframes = fcurve.keyframe_points
-        i = 1  # Start from second keyframe
-        
-        while i < len(keyframes) - 1:
-            prev_kf = keyframes[i - 1]
-            curr_kf = keyframes[i]
-            next_kf = keyframes[i + 1]
-            
-            # Check if current keyframe is redundant (same value as before and after within threshold)
-            if (
-                abs(prev_kf.co.y - curr_kf.co.y) < threshold and
-                abs(next_kf.co.y - curr_kf.co.y) < threshold
-            ):
-                keyframes.remove(curr_kf)
-            else:
-                i += 1  # Only increment if we didn't delete to avoid skipping elements
-
 def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=True) -> bpy.types.Action:
     anim = SEAnim.Anim(filepath)
 
@@ -344,7 +318,6 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
         print("No fcurves, deleting: ", action.name)
         bpy.data.actions.remove(action)
         return
-    remove_redundant_keyframes(action)
 
     # Notetracks
     for note in anim.notes:

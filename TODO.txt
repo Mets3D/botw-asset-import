@@ -1,12 +1,16 @@
 
 TODO:
-    4.4 food for thought:
-        - Could slotted actions be used somehow? Does any import or clean-up code need tweaking?
-            - Yes, they say action.fcurves will be nuked in 5.0 https://developer.blender.org/docs/release_notes/4.4/python_api/#deprecated
-        - Should we Tris to Quads anything, or just come up with an operator that finds the best settings (least remaining triangles)?
-        - New Glare compositing node, should check if we can make it look better.
-        - Check the asset browser's ability to sort by catalog, sounds useful for showcasing it and should probably be set in the files.
-        - Set my startup file to export to h.265?
+    Make UILayout consistent across all files, or at least files of the same type.
+        Default workspaces
+        Material Preview without overlays + solid view with overlays?
+        Asset Browser with relevant category active.
+        outliner, properties, action editor if necessary.
+        maybe add ReadMe's.
+    Should really add per-object and/or per-material shading controls (expose more sockets or add more Attribute nodes or both) for the rimlights especially.
+
+    Cleanup
+        Anim
+            Generic NPCs (DONE)
 
     Linkle (separate upload)
     Zelda (separate upload)
@@ -18,54 +22,52 @@ TODO:
 
     There's a bug in the image cropping if the image starts with a bunch of empty rows, idk.
 
-Things to do with final cleanup script or manual:
-    It looks like a bunch of animations don't have properly groupped fcurves (see Goron Child: Common_Sleep)
-        Could probably remove keyframes at frame -1
-        Could probably remove keyframes on default values if the entire fcurve is keyed at that value
-        Set keyframe handle types to Automatic
+Cleanup.py DONE
+    Objects
+        Apply Transforms
+        Remove pointless "_Model" from obnames.
+        Rename obdatas to obname
+        Clean up custom properties of cloudrig/cycles
+        Hide InsideMat objects from viewport and render, and remove material
+    Armatures
+        Make sure all armatures have a "Root" bone
+        Make sure bone widgets are linked
+        Reset bone transforms
+        Remove 1-bone armatures
+            Also remove Armature modifiers without a target.
+    Animations
+        Fix missing fcurve groups
+        Remove keyframes at negative frames (usually default pose is keyed at frame -1)
+        Remove fcurves that are always keyed on default value (even if we end up removing partial transforms, like only Y rotation)
+        Remove useless bits from Action names
 
-
-    Should really add per-object and/or per-material shading controls (expose more sockets or add more Attribute nodes or both) for the rimlights especially.
+    Improve names of objects, collections
     Make all asset collections hide_viewport=False
-    Clean up custom properties like those from cloudrig, idk why they even exist? maybe it's only on the smubin stuff.
-    Hide InsideMat objects from viewport and render, and remove material or assign an Invisible material.
-    Crop asset thumbnails with the operator.
-    Could check for cases where a material uses an incomplete textureset (not as many of Alb, Spm, Nrm are used as exist)
-    Make sure all armatures have a "Root" bone. Probably even those that won't have any animations.
-        Would be nice to assign a widget to these as well.
-    Make sure resources.blend is linked from the same directory and with a relative path.
-    Make sure lighting set-up is good, since we cut overall cel shaded lighting strength by 2/3rds
-    Check for any image nodes with no image.
+    Crop asset thumbnails
+    Set lights consistently
+    Report if any library is not from a neighbouring file
+    Report any image nodes with no image
 
-    Try to remove "A", "B" and numbers from asset names.
-    Remove pointless "_Model" from obnames.
-    Rename obdatas to obname
-    Make sure any object that has "Inside_Mat" in the name is very very disabled and hidden, and maybe even has no material or assign an Invisible material.
-    Rename materials to the albedo name with _Alb ending (if there is an albedo texture ofc), and numbering if necessary.
+Cleanup.py TODO:
+    Objects
+        FldObj mostly: Try to remove "A", "B" and numbers from asset names.
+
+    Materials
+        Make sure SPM and Nrm textures are non-color and Alb are sRGB (although check first). Some Emm are sRGB and some aren't, so leave those alone.
+        Everything has this awful metallic viewport material from the fbx import... Could try setting to the average or median albedo pixel.
+        Could check for cases where a material uses an incomplete textureset (not as many of Alb, Spm, Nrm are used as exist)
+
+        Re-ensure that active texture is most ideal; Albedo, or Emission, or SPM, or Normal.
         Materials using an SPM UV node but on objects whose meshes don't have an SPM UVMap need to insert a UV Fallback node.
+        Could fairly easily de-duplicate SPM UVMap nodes
+
+        Rename materials to the albedo name with _Alb ending (if there is an albedo texture ofc), and numbering if necessary.
         Remove unnecessary (dot) .001 material name endings.
         Remove any (underscore) "_###" regex match from material names.
-        Replace "D L C  " with "DLC"
-        Remove double spaces from object, collection, material names
 
-    Make sure any uses of the Ancient Weapon Blade shader have the Alpha hooked up from the same node as the Fx Texture Distorted input rather than anything else.
-    Make sure to apply transforms (first check if anything is un-applied and check if it's correct)
-    Maybe remove 1-bone armatures
-        Also remove Armature modifiers without a target.
-    Re-ensure that active texture is most ideal; Albedo, or Emission, or SPM, or Normal.
-    Could fairly easily de-duplicate SPM UVMap nodes
-    Could try hashing pixel data to de-duplicate textures. Otherwise, compare their average color and if it falls within a threshold, list them out.
-    Everything has this awful metallic viewport material from the fbx import... Could try setting to the average or median albedo pixel.
-    Make sure armature bone positions are reset. Plenty of cases where they imported with pose data.
-    Make sure SPM and Nrm textures are non-color and Alb are sRGB (although check first). Some Emm are sRGB and some aren't, so leave those alone.
-    Nuke all text datablocks, or maybe add a ReadMe.
+        Make sure any uses of the Ancient Weapon Blade shader have the Alpha hooked up from the same node as the Fx Texture Distorted input rather than anything else.
 
-
-    Make UILayout consistent across all files, or at least files of the same type.
-        Default workspaces
-        Material Preview without overlays + solid view with overlays?
-        Asset Browser with relevant category active.
-        outliner, properties, action editor if necessary.
+        Could try hashing pixel data to de-duplicate textures. Otherwise, compare their average color and if it falls within a threshold, list them out.
 
 
 Things I had to fix/do manually:

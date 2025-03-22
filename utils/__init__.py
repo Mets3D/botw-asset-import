@@ -1,6 +1,7 @@
 # These submodules should be kept mostly add-on agnostic and reusable.
 
 module_names = (
+    "action",
     "catalogs",
     "collections",
     "deduplicate_materials",

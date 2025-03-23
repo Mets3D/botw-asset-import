@@ -1,10 +1,9 @@
-import bpy, os, re, json, math
+import bpy, os, re, json
 from collections import OrderedDict
 from math import pi
 from pathlib import Path
 
-from mathutils import Vector
-from bpy.props import StringProperty
+from mathutils import Vector, Color
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
 
@@ -25,7 +24,7 @@ TEXTURE_EXTENSION = ".png"
 
 DYES = ["Default", "Blue", "Red", "Yellow", "White", "Black", "Purple", "Green", "Light Blue", "Navy", "Orange", "Peach", "Crimson", "Light Yellow", "Brown", "Gray"]
 OBJ_PREFIXES = ["Obj_", "TwnObj_", "TwnObjVillage_", "FldObj_", "DgnObj_", "DgnMrgPrt_"]
-PRIMITIVE_NAMES = ["_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane", "pSolid"]
+PRIMITIVE_NAMES = ["_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane", "pSolid", "_plantroot", "_pPipe"]
 GARBAGE_MATS = ["InsideArea", "InsideMat"]
 TEX_SUFFIXES = ["_Alb", "_Spm", "_Nrm", "_Emm", "_Emm", "_Clr", "_Mtl"]
 
@@ -392,6 +391,11 @@ def import_and_merge_fbx_data(context, *, dae_objs, dae_path, asset_name):
                 if pb.name in ("Face_Root"):
                     for child_pb in pb.children_recursive:
                         child_pb.custom_shape_scale_xyz *= 0.1
+            if "_Controled" in pb.name:
+                # Found in Hylian heads, eg. "Neck_Controled", "Head_Controled"
+                # Probably referring to the fact that in the game engine, 
+                # these bones are constrained to another armature's bones of the same name.
+                pb.name = pb.name.replace("_Controled", "")
             else:
                 if any([pb.name.endswith(suf) for suf in ("_R", "_FR", "_BR", "_R_1", "_R_2")]):
                     pb.custom_shape_rotation_euler.z = 0
@@ -481,6 +485,7 @@ def cleanup_mesh(collection, obj, asset_name):
 
         with Timer("Setup material", mat.name):
             setup_material(collection, obj, mat)
+            set_object_color(obj)
 
 def setup_material(collection, obj, material):
     """A giant function that tries to set up complete materials based on nothing but the single
@@ -518,6 +523,7 @@ def setup_material(collection, obj, material):
         hookup_rgb_nodes(material, shader_node)
 
     set_shader_socket_values(collection, obj, material, shader_node, spm_has_green)
+    fix_material_settings(material)
     material['hash'] = hash_material(material)
 
 def load_assigned_textures(material) -> OrderedDict[bpy.types.Image, str]:
@@ -1361,6 +1367,75 @@ def tweak_material_json(data):
         return num
 
     return data
+
+def fix_material_settings(m):
+    if m.library:
+        return
+    m.metallic = 0
+    m.roughness = 0.8
+    m.diffuse_color = [0.8, 0.8, 0.8, 1.0]
+    if not m.use_nodes:
+        return
+    albedo_node = get_albedo_img_node(m)
+    if albedo_node:
+        m.node_tree.nodes.active = albedo_node
+    average_color = get_average_albedo_color(m)
+    if average_color:
+        average_color = Color(average_color[:3])
+        if average_color.s < 0.4:
+            average_color.s = 0.4
+        if average_color.v < 0.4:
+            average_color.v = 0.4
+        m.diffuse_color = (average_color.r, average_color.g, average_color.b, 1.0)
+
+def set_object_color(obj):
+    if obj.type != 'MESH':
+        return
+    if len(obj.data.materials) == 0:
+        return
+    mat = obj.data.materials[0]
+    if mat:
+        obj.color = obj.data.materials[0].diffuse_color
+    obj.data.uv_layers.active_index = 0
+
+def get_average_albedo_color(material) -> tuple or None:
+    albedo_socket = get_albedo_socket(material)
+    if not albedo_socket:
+        return material.diffuse_color
+    if len(albedo_socket.links) == 0:
+        return albedo_socket.default_value
+    albedo_node = albedo_socket.links[0].from_node
+    if albedo_node.type != 'TEX_IMAGE' or albedo_node.image == None:
+        return
+    if 'average_color' in albedo_node.image:
+        return albedo_node.image['average_color'].to_list()
+    pixel_image = PixelImage.from_blender_image(albedo_node.image)
+    albedo_node.image['average_color'] = pixel_image.average_color
+    return pixel_image.average_color
+
+def get_albedo_socket(material):
+    if not material.use_nodes:
+        return
+    nodes = material.node_tree.nodes
+    output_node = next((n for n in nodes if n.type=='OUTPUT_MATERIAL'), None)
+    if not output_node:
+        return
+    if len(output_node.inputs[0].links) == 0:
+        return
+    shader_node = output_node.inputs[0].links[0].from_node
+    albedo_socket = shader_node.inputs.get('Albedo')
+    return albedo_socket # can be None.
+
+def get_albedo_img_node(material) -> bpy.types.ShaderNodeTexImage or None:
+    if not material.use_nodes:
+        return
+    albedo_socket = get_albedo_socket(material)
+    if not albedo_socket or len(albedo_socket.links) == 0:
+        return
+    albedo_node = albedo_socket.links[0].from_node
+    if albedo_node.type != 'TEX_IMAGE':
+        return
+    return albedo_node
 
 # Register the operator
 def menu_func_import(self, context):

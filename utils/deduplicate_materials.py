@@ -10,13 +10,13 @@ def deduplicate_materials(objects):
             continue
         for mat in obj.data.materials:
             if 'hash' not in mat:
-                continue
+                mat['hash'] = hash_material(mat)
             mat_hash = mat['hash']
             if mat_hash in mat_hashes:
                 print(f"Duplicate material: '{mat.name}' -> {mat_hashes[mat_hash].name}")
                 if len(mat.node_tree.nodes) < 3:
-                    # print("Fewer than 3 nodes. Won't de-duplicate.")
-                    pass
+                    print("Fewer than 3 nodes. Won't de-duplicate.")
+                    continue
                 mat.user_remap(mat_hashes[mat_hash])
                 if mat_hash not in copy_counter:
                     copy_counter[mat_hash] = 0

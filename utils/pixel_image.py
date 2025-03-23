@@ -1,5 +1,6 @@
-import bpy, math
+import bpy
 from .timer import Timer
+from statistics import mean
 
 class PixelImage:
     """Store some pixels either from raw data or a Blender image, 
@@ -141,6 +142,12 @@ class PixelImage:
 
     @property
     def pixels_rgba(self):
+        try: 
+            if self.bpy_img:
+                self.bpy_img.name
+        except ReferenceError:
+            # Image has been removed.
+            return []
         if not self._pixels_rgba:
             with Timer("Pixel cache", self.bpy_img.name if self.bpy_img else ""):
                 # NOTE: Careful! Accessing bpy_img.pixels is very slow! Do this only when needed!
@@ -159,6 +166,7 @@ class PixelImage:
         self._has_blue = None
         self._has_alpha = None
         self._all_channels_match = None
+        self._average_color = None
 
         self._pixels_rgba = value
 
@@ -191,6 +199,19 @@ class PixelImage:
         if self._has_alpha == None:
             self._has_alpha = any([p[3] != 1 for p in self.pixels_rgba])
         return self._has_alpha
+
+    @property
+    def average_color(self):
+        if self._average_color == None:
+            filtered_colors = [(r, g, b) for r, g, b, a in self.pixels_rgba if a == 1.0]
+
+            # Compute the average RGB
+            if filtered_colors:
+                self._average_color = tuple(map(mean, zip(*filtered_colors)))
+            else:
+                self._average_color = (0, 0, 0)  # Default if no valid colors
+
+        return self._average_color
 
     @property
     def all_channels_match(self):

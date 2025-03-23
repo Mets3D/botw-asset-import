@@ -1,5 +1,6 @@
 
 TODO:
+    Make sure all textures are packed.
     Make UILayout consistent across all files, or at least files of the same type.
         Default workspaces
         Material Preview without overlays + solid view with overlays?
@@ -9,18 +10,27 @@ TODO:
     Should really add per-object and/or per-material shading controls (expose more sockets or add more Attribute nodes or both) for the rimlights especially.
 
     Batch .seanim import should set action slot names to the active rig's name
+        I think I did this already didn't I?
 
     Cleanup
         (ALL DONE) Anim
-            Generic NPCs
-            Animals
-            Enemies
-            Named NPCs
-            Link
-        Char
+        (ALL DONE) Char
         Obj
+            (DONE) Items
+            (DONE) Weapons
+                I forgot to make sure Ancient Weapon Blade shaders have the Alpha hooked up from the same node as the Fx Texture Distorted input rather than anything else.
+            (DONE) Fauna
+            (DONE) Objects
+            (DONE) Shrine
+            (DONE) Town_P1
+                It looks like I lost Akkala Tech Lab and Hateno Tech Lab, wtf. But meh, should get them from bmubin importer anyways... :/
+            (DONE) Town_P2
+            (DONE) FldObj
+            (DONE) HyruleCastle
         resources
         BlankFile
+
+    Convert the Eye Glint_Alb from .dds to anything else because Blender complains about it sometimes.
 
     Linkle (separate upload)
     Zelda (separate upload)
@@ -54,32 +64,21 @@ Cleanup.py DONE
         Improve names of objects, collections
         Make all asset collections hide_viewport=False
         Crop asset thumbnails
-
-    Set lights consistently
-    Report if any library is not from a neighbouring file
-    Report any image nodes with no image
-
-Cleanup.py TODO:
-    Objects
-        FldObj mostly: Try to remove "A", "B" and numbers from asset names.
-
     Materials
-        Make sure SPM and Nrm textures are non-color and Alb are sRGB (although check first). Some Emm are sRGB and some aren't, so leave those alone.
-        Everything has this awful metallic viewport material from the fbx import... Could try setting to the average or median albedo pixel.
-        Could check for cases where a material uses an incomplete textureset (not as many of Alb, Spm, Nrm are used as exist)
-
-        Re-ensure that active texture is most ideal; Albedo, or Emission, or SPM, or Normal.
-        Materials using an SPM UV node but on objects whose meshes don't have an SPM UVMap need to insert a UV Fallback node.
-        Could fairly easily de-duplicate SPM UVMap nodes
-
-        Rename materials to the albedo name with _Alb ending (if there is an albedo texture ofc), and numbering if necessary.
-        Remove unnecessary (dot) .001 material name endings.
-        Remove any (underscore) "_###" regex match from material names.
-
-        Make sure any uses of the Ancient Weapon Blade shader have the Alpha hooked up from the same node as the Fx Texture Distorted input rather than anything else.
-
-        Could try hashing pixel data to de-duplicate textures. Otherwise, compare their average color and if it falls within a threshold, list them out.
-
+        Report suspicious color spaces (only _Alb should be sRGB, everything else Non-Color)
+        Remove any (underscore) "_###" regex match from material names. (also object and collection names)
+        De-duplicate textures if their RGBA pixel data and size are a perfect match
+        Report any UVMap nodes referencing a UVMap that isn't present on the mesh using the material
+        Report any image nodes with no image
+        De-duplicate unnecessary UVMap nodes (importer used to make one per image instead of one per UVMap)
+        Viewport Display
+            Set viewport settings (metallic, roughness, color) to decent values (also object color)
+            Set Albedo as active texture node if available
+            Set active UV Layer to the first one
+        Rename materials to the albedo name
+    Misc
+        Set lights consistently
+        Report if any library is not from a neighbouring file
 
 Things I had to fix/do manually:
     Asset previews and catalogs
@@ -97,7 +96,6 @@ Things I had to fix/do manually:
         Decal materials needed their Blend mode set to Blended.
         Some animals had the wrong textures hooked up.
         Some eye materials that didn't get detected as eye materials.
-
 
 Could be fun to make a leaves particle system using FlowerFallenLeavesAlb_Slice_0_.png etc
 

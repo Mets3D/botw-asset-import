@@ -55,12 +55,12 @@ class OBJECT_OT_armature_constrain(bpy.types.Operator):
 
 registry = [OBJECT_OT_armature_constrain]
 
-def draw_armature_merge(self, context):
+def draw_armature_constrain_outfit(self, context):
     if context.active_object and context.active_object.type == 'ARMATURE':
         self.layout.operator(OBJECT_OT_armature_constrain.bl_idname)
 
 def register():
-    bpy.types.VIEW3D_MT_object_constraints.append(draw_armature_merge)
+    bpy.types.VIEW3D_MT_object_constraints.append(draw_armature_constrain_outfit)
 
 def unregister():
-    bpy.types.VIEW3D_MT_object_constraints.remove(draw_armature_merge)
+    bpy.types.VIEW3D_MT_object_constraints.remove(draw_armature_constrain_outfit)

@@ -129,7 +129,10 @@ def asset_thumbnail_from_viewport(context, id, operator=None):
             area.spaces.active.overlay.show_overlays = False
             break
     with Timer("OpenGL Render"):
+        org_res = context.scene.render.resolution_x, context.scene.render.resolution_y
+        context.scene.render.resolution_x, context.scene.render.resolution_y = 512, 512
         bpy.ops.render.opengl()
+        context.scene.render.resolution_x, context.scene.render.resolution_y = org_res
     area.spaces.active.overlay.show_overlays = overlays_bkp
     render_result = next(image for image in bpy.data.images if image.type == "RENDER_RESULT")
     if not render_result:

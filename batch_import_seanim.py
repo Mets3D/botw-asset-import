@@ -2,89 +2,130 @@ import bpy, os
 from bpy.props import EnumProperty, BoolProperty, StringProperty
 from .prefs import get_addon_prefs
 from .io_anim_seanim.import_seanim import load_seanim
-from .utils.action import remove_redundant_keyframes
+from .utils.action import remove_redundant_keyframes, remove_negative_frames, fix_groups
 from .asset_names import asset_names
 from math import pi
 
 class SCENE_OT_import_batch_seanim(bpy.types.Operator):
-    """Import .seanim files from the Animations folder specified in the preferences, for every BotW asset found in this scene"""
+    """Import .seanim files from the Animations folder specified in the preferences, for the active armature imported by this add-on"""
     bl_idname = "scene.import_batch_seanim"
     bl_label = "Auto-Import .seanim for all assets"
     bl_options = {'REGISTER', 'UNDO'}
 
-    import_mode: EnumProperty(
-        name="Import Mode",
-        items=[
-            ('SELECTED', 'Selected', 'Auto-import animations of selected armatures'),
-            ('ALL', 'All', 'Auto-import animations of all visible armatures'),
-        ])
+    asset_name_override: StringProperty(
+        name="Override Asset Name",
+        description="The asset name will be appended before the action name, eg. 'Lynel: Wait'. If the asset name is too long, you can enter something here to override it",
+        default="",
+        options={'SKIP_SAVE'}
+    )
     fix_root: BoolProperty(
         name="Fix Root Animation",
         description="Fix the root being rotated by 90 degrees using baking and shennanigans",
         default=True
     )
+    overwrite: BoolProperty(
+        name="Overwrite Existing",
+        description="If an animation already seems to exist in the .blend file, overwrite it. If this is False, the animation will be skipped instead",
+        default=False
+    )
+
+    @classmethod
+    def poll(cls, context):
+        rig = context.active_object
+        if not rig or rig.type != 'ARMATURE':
+            cls.poll_message_set("No armature selected.")
+            return False
+        if not any(['dirname' in child for child in rig.children_recursive]):
+            cls.poll_message_set("Imported BotW rigs should have child objects with a 'dirname' custom property that stores their directory name. Without this, we don't know which animations to import.")
+            return False
+        return True
 
     def invoke(self, context, _event):
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
         anim_folder = get_addon_prefs(context).game_anims_folder
-        objs = context.scene.objects if self.import_mode=='ALL' else context.selected_objects
-        for rig in [r for r in objs if r.type=='ARMATURE']:
-            dir_names = set()
-            for child in rig.children_recursive:
-                if 'dirname' in child:
-                    dir_names.add(child['dirname'])
+        rig = context.active_object
+        dir_names = set()
+        for child in rig.children_recursive:
+            if 'dirname' in child:
+                dir_names.add(child['dirname'])
 
-            # TODO: context override might be better. (it never is)
-            context.view_layer.objects.active = rig
-            rig.select_set(True)
-            if not rig.visible_get() or not rig.select_get():
-                print("Couldn't select rig: ", rig.name)
-                continue
-            actions = []
-            for dir_name in dir_names:
-                anim_name = dir_name + "_Animation"
-                asset_name = asset_names.get(dir_name, dir_name)
-                another_name = dir_name.rsplit("_", 1)[0] + "_Animation"
-                for dirname in (anim_name, dir_name, another_name):
-                    asset_anim_folder = anim_folder+dirname
-                    if not os.path.isdir(asset_anim_folder):
+        if not dir_names:
+            self.report({'ERROR'}, "No 'dirname' custom property found on child objects, don't know what to import: " + rig.name)
+            return {'CANCELLED'}
+
+        rig.select_set(True)
+        if not rig.visible_get() or not rig.select_get():
+            print("Couldn't select rig: ", rig.name)
+            return {'CANCELLED'}
+
+        actions = []
+        for dir_name in dir_names:
+            anim_name = dir_name + "_Animation"
+            if self.asset_name_override:
+                asset_name = self.asset_name_override
+            else:
+                asset_name = asset_names.get(dir_name, dir_name).replace("Enemy_", "").replace("Animal_", "")
+            another_name = dir_name.rsplit("_", 1)[0] + "_Animation"
+            for dirname in (anim_name, dir_name, another_name):
+                asset_anim_folder = anim_folder+dirname
+                if not os.path.isdir(asset_anim_folder):
+                    print("Not found: ", asset_anim_folder)
+                    continue
+
+                print("Asset anim folder found: ", asset_anim_folder)
+
+                for entry in os.listdir(asset_anim_folder):
+                    if not entry.endswith(".seanim"):
                         continue
 
-                    print("Asset anim folder found: ", asset_anim_folder)
-
-                    for entry in os.listdir(asset_anim_folder):
-                        if not entry.endswith(".seanim"):
-                            continue
-
-                        existing_action = bpy.data.actions.get(asset_name + ": " + entry.split(".")[0])
-                        if existing_action:
+                    existing_action = bpy.data.actions.get(asset_name + ": " + entry.split(".")[0])
+                    if existing_action:
+                        if not self.overwrite:
                             actions.append(existing_action)
                             continue
-                        fullpath = os.path.join(asset_anim_folder, entry)
-                        action = load_seanim(context, filepath=fullpath)
-                        if not action:
-                            print("Failed to load anim: ", fullpath)
-                            continue
                         else:
-                            print("Loaded anim: ", fullpath)
-                        remove_redundant_keyframes(action)
-                        action.name = asset_name + ": " + action.name
-                        action.asset_mark()
-                        actions.append(action)
+                            existing_action.name += "_old"
+                    fullpath = os.path.join(asset_anim_folder, entry)
+                    action = load_seanim(context, filepath=fullpath)
+                    if not action:
+                        print("Failed to load anim: ", fullpath)
+                        continue
+                    action.name = asset_name + ": " + action.name
+                    print(f"Loaded anim: {fullpath} -> {action.name}")
+                    remove_negative_frames(action)
+                    fix_groups(action)
+                    remove_redundant_keyframes(action)
+                    action.asset_mark()
+                    actions.append(action)
 
-            bpy.ops.object.mode_set(mode='OBJECT')
+                    if existing_action and self.overwrite:
+                        existing_action.user_remap(action)
+                        if existing_action.asset_data:
+                            action.asset_data.catalog_id = existing_action.asset_data.catalog_id
+                            if existing_action.preview:
+                                action.preview_ensure()
+                                action.preview.image_size = existing_action.preview.image_size[:]
+                                action.preview.image_pixels_float = existing_action.preview.image_pixels_float[:]
+                        bpy.data.actions.remove(existing_action)
+                        print("Overwrote pre-existing action.")
 
-            if self.fix_root:
-                for action in actions:
-                    action.slots[0].name_display = rig.name
-                fix_root_motion_with_baking(context, rig, actions)
+        if not actions:
+            self.report({'ERROR'}, "No actions imported: " + anim_folder+next(iter(dir_names)))
+            return {'CANCELLED'}
 
-            if rig.animation_data:
-                rig.animation_data.action = None
-            for pb in rig.pose.bones:
-                pb.matrix_basis.identity()
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        if self.fix_root:
+            for action in actions:
+                action.slots[0].name_display = rig.name
+            fix_root_motion_with_baking(context, rig, actions)
+
+        if rig.animation_data:
+            rig.animation_data.action = None
+        for pb in rig.pose.bones:
+            pb.matrix_basis.identity()
 
         return {'FINISHED'}
 

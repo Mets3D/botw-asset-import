@@ -1,7 +1,6 @@
 import bpy, os
 from bpy.types import Object
 
-
 def get_resources_blend_path() -> str:
     filedir = os.path.dirname(os.path.realpath(__file__))
     blend_path = os.sep.join([filedir, 'resources.blend'])

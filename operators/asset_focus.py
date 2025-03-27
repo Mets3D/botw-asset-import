@@ -1,9 +1,9 @@
 import bpy
 from bpy.props import BoolProperty
-from .utils.collections import find_layer_collection_by_collection
+from ..utils.collections import find_layer_collection_by_collection
 from mathutils import Vector
-from .utils.timer import Timer
-from .ui_asset_metadata import get_asset_library
+from ..utils.timer import Timer
+from ..ui.ui_asset_metadata import get_asset_library
 
 # TODO: support objects!
 

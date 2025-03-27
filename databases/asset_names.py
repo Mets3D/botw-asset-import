@@ -1,4 +1,6 @@
-# https://github.com/MrCheeze/botw-tools/blob/master/botw_names.json
+# Based on https://github.com/MrCheeze/botw-tools/blob/master/botw_names.json
+# But heavily modified to align more with the purposes of this add-on.
+# Also not interpreted literally, eg. code accounts for "Enemy_" prefix being optional.
 
 asset_names = {
     "AncientArrow": "Ancient Arrow",

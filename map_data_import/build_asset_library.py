@@ -8,8 +8,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from ..prefs import get_addon_prefs
 from ..utils.collections import ensure_collection
 
+# TODO: Move these to the preferences or derive from existing preferences
 BLEND_DIR = "D:\\BotW Assets\\bmubin asset library\\assets"
-INSTANCE_DATA_DIR = "D:\\BotW Assets\\bmubin asset library\\instance_cache"
+
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 
 ADDON_DIR = os.sep.join(os.path.dirname(__file__).split(os.sep)[:-1])
@@ -19,7 +20,7 @@ DEFAULT_BLEND = os.path.join(THIS_FOLDER, "asset_blank_file.blend")
 
 BLENDER = os.path.abspath(sys.argv[0])
 
-INSTANCE_CACHE_ZIP = os.path.join(THIS_FOLDER, "instance_cache.zip")
+INSTANCE_CACHE_ZIP = os.path.join(ADDON_DIR, "databases", "world_instance_cache.zip")
 
 class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
     """Build asset cache one .blend per asset for importing bmubin's map data"""
@@ -144,7 +145,7 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
         layout.prop(self, 'map_section')
 
     def execute(self, context):
-        map_data = load_map_data()[self.map_section+"_instance_cache.json"]
+        map_data = load_instance_database()[self.map_section+"_instance_cache.json"]
 
         dynamic_assets = map_data[self.map_section+"_Dynamic"]["models"]
         static_assets = map_data[self.map_section+"_Static"]["models"]
@@ -222,19 +223,23 @@ def ensure_asset_collection(blend_dir, asset_name) -> bpy.types.Collection or No
     return new_coll
 
 
-def load_map_data() -> dict:
-    extracted_files = {}
+def load_instance_database() -> dict:
+    # This cache and database was taken from the source code of bmubin.
+    # No idea how the bmubin dev generated this, but likely the same way as projects like ice-spear,
+    # by bein much smarter than me and reading .sbfres binary data.
+    # Many thanks!
+    instance_database = {}
 
     with open(INSTANCE_CACHE_ZIP, "rb") as f:
         zip_data = f.read()
 
-        # Open the ZIP file from memory
+        # Load the .zip file into memory
         with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
             for file_name in z.namelist():
                 with z.open(file_name) as file:
-                    extracted_files[file_name] = json.loads(file.read())
+                    instance_database[file_name] = json.loads(file.read())
 
-    return extracted_files
+    return instance_database
 
 
 def get_dae_files_to_process(dae_dir, blend_dir, overwrite=False, ignore=[], map_section=None):
@@ -251,7 +256,7 @@ def get_dae_files_to_process(dae_dir, blend_dir, overwrite=False, ignore=[], map
         dae_to_blend_map = {dae:blend for dae, blend in dae_to_blend_map.items() if not os.path.isfile(blend)}
 
     if map_section:
-        map_data = load_map_data()
+        map_data = load_instance_database()
         for key, value in map_data.items():
             if map_section != 'ALL' and key != map_section+"_instance_cache.json":
                 continue

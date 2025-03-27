@@ -1,9 +1,9 @@
 import bpy, os
-from .op_focus_asset import focus_action, focus_collections
+from .asset_focus import focus_action, focus_collections
 from bpy.props import BoolProperty
-from .botw_batch_fbx_import import PixelImage
-from .utils.progressbar import ProgressBar
-from .utils.timer import Timer
+from .botw_batch_asset_import import PixelImage
+from ..utils.progressbar import ProgressBar
+from ..utils.timer import Timer
 
 class ASSET_OT_thumbnail_from_viewport(bpy.types.Operator):
     """Create an asset preview from a viewport render."""

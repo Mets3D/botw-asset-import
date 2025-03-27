@@ -1,5 +1,4 @@
 import bpy
-from bpy.props import StringProperty
 
 class ASSETBROWSER_OT_rename_asset(bpy.types.Operator):
     """Rename the active asset, if it is local."""

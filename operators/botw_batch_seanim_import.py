@@ -1,9 +1,9 @@
 import bpy, os
 from bpy.props import EnumProperty, BoolProperty, StringProperty
-from .prefs import get_addon_prefs
-from .io_anim_seanim.import_seanim import load_seanim
-from .utils.action import remove_redundant_keyframes, remove_negative_frames, fix_groups
-from .asset_names import asset_names
+from ..prefs import get_addon_prefs
+from ..io_anim_seanim.import_seanim import load_seanim
+from ..utils.action import remove_redundant_keyframes, remove_negative_frames, fix_groups
+from ..databases.asset_names import asset_names
 from math import pi
 
 class SCENE_OT_import_batch_seanim(bpy.types.Operator):

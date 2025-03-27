@@ -4,17 +4,17 @@ from bpy.props import BoolProperty
 from mathutils import Matrix, Vector, Euler
 from math import pi
 
-from .op_thumbnail_from_viewport import crop_asset_preview
-from .botw_batch_fbx_import import PRIMITIVE_NAMES, GARBAGE_MATS, fix_material_settings, get_albedo_img_node, set_object_color, ensure_nodetree, cleanup_fbx_armature
-from .asset_names import asset_names
+from .asset_thumbnail_render import crop_asset_preview
+from .botw_batch_asset_import import PRIMITIVE_NAMES, GARBAGE_MATS, fix_material_settings, get_albedo_img_node, set_object_color, ensure_nodetree, cleanup_fbx_armature
+from ..databases.asset_names import asset_names
 
-from .utils.collections import find_layer_collection_by_collection
-from .utils.action import remove_redundant_keyframes, remove_negative_frames, fix_groups
-from .utils.catalogs import asset_catalogs_to_scene_collection
-from .utils.pixel_image import PixelImage
+from ..utils.collections import find_layer_collection_by_collection
+from ..utils.action import remove_redundant_keyframes, remove_negative_frames, fix_groups
+from ..utils.catalogs import asset_catalogs_to_scene_collection
+from ..utils.pixel_image import PixelImage
 
 class OBJECT_OT_botw_cleanup(bpy.types.Operator):
-    """Some clean-up operations to catch up assets that were imported with WIP versions of the importer."""
+    """Some clean-up operations to catch up assets that were imported with WIP versions of the importer. You'll probably never need to use this."""
 
     bl_idname = "object.botw_cleanup"
     bl_label = "BotW: Cleanup"

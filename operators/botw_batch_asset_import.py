@@ -7,18 +7,19 @@ from mathutils import Vector, Color, Euler
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
 
-from .asset_names import asset_names
-from .utils.collections import ensure_collection, set_active_collection
-from .widgets import ensure_widget, get_resources_blend_path
-from .prefs import get_addon_prefs
-from .utils.deduplicate_materials import deduplicate_materials, hash_material
-from .utils.timer import Timer
-from .utils.pixel_image import PixelImage
-from .dae_fixer import fix_dae_uvmaps_in_place
+from ..databases.asset_names import asset_names
+from ..utils.collections import ensure_collection, set_active_collection
+from ..utils.widgets import ensure_widget, get_resources_blend_path
+from ..prefs import get_addon_prefs
+from ..utils.deduplicate_materials import deduplicate_materials, hash_material
+from ..utils.timer import Timer
+from ..utils.pixel_image import PixelImage
+from ..utils.dae_fixer import fix_dae_uvmaps_in_place
 
 PRINT_LATER = []
 
 # These things are case-sensitive but it shouldn't matter.
+# TODO: Could make this extension agnostic.
 ICON_EXTENSION = ".jpg"
 TEXTURE_EXTENSION = ".png"
 

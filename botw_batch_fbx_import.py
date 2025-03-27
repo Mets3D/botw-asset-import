@@ -3,7 +3,7 @@ from collections import OrderedDict
 from math import pi
 from pathlib import Path
 
-from mathutils import Vector, Color
+from mathutils import Vector, Color, Euler
 from bpy.types import Operator
 from bpy_extras.io_utils import ImportHelper
 
@@ -103,14 +103,14 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 if root_dir_name != parent_coll_name:
                     parent_coll_name = asset_names.get(parent_coll_name, parent_coll_name)
                     parent_coll = ensure_collection(context, parent_coll_name)
-            for dae_file in dae_files:
-                asset_name = derive_asset_name(dae_file, dirname, len(dae_files)==1)
+            for dae_name in dae_files:
+                asset_name = derive_asset_name(dae_name, dirname, len(dae_files)==1)
 
                 if 'Animation' in asset_name:
                     continue
-                filepath = os.path.join(root, dae_file)
-                with Timer("Full Import", dae_file):
-                    imported_objects += import_and_setup_single_dae(context, filepath, dae_file, asset_name, parent_coll, counter)
+                full_path = os.path.join(root, dae_name)
+                with Timer("Full Import", dae_name):
+                    imported_objects += import_and_setup_single_dae(context, full_path, asset_name, parent_coll)
             counter += 1
 
         for lateprint in PRINT_LATER:
@@ -241,8 +241,10 @@ def ensure_world_and_lights(context) -> bpy.types.World:
     world = bpy.data.worlds.get(WORLD_NAME)
     return world
 
-def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent_coll, counter=0) -> list[bpy.types.Object]:
-    dirname = os.path.basename(os.path.dirname(filepath))
+def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll=None) -> list[bpy.types.Object]:
+    filename = os.path.basename(full_path)
+    asset_name = asset_name or os.path.splitext(filename)[0]
+    dirname = os.path.basename(os.path.dirname(full_path))
 
     prefs = get_addon_prefs()
 
@@ -257,8 +259,8 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
     set_active_collection(context, collection)
 
     with Timer("Import .dae + .fbx", asset_name):
-        objs = import_dae(context, filepath, discard_types=('EMPTY'))
-        objs = import_and_merge_fbx_data(context, dae_objs=objs, dae_path=filepath, asset_name=asset_name)
+        objs = import_dae(context, full_path, discard_types=('EMPTY'))
+        objs = import_and_merge_fbx_data(context, dae_objs=objs, dae_path=full_path, asset_name=asset_name)
     if not objs:
         return []
 
@@ -273,15 +275,13 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
             with context.temp_override(**override):
                 bpy.ops.ed.lib_id_load_custom_preview(filepath=icon_filepath)
 
-    json_base_path = os.path.dirname(filepath)
+    json_base_path = os.path.dirname(full_path)
     if prefs.game_models_folder:
         json_base_path = os.path.join(prefs.game_models_folder, dirname)
 
-    offsets = {}
-    dae_textures = get_textures_used_by_dae(filepath)
+    dae_textures = get_textures_used_by_dae(full_path)
     for obj in context.selected_objects:
         if obj.type == 'ARMATURE':
-            offsets[obj] = counter
             if obj.animation_data and obj.animation_data.action:
                 obj.animation_data.action = None
             if len(obj.data.bones) < 2:
@@ -308,6 +308,9 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
                         obj.name = obj.name.split(primitive)[0]
                 if obj.name.endswith("_Root"):
                     obj.name = obj.name[:-5]
+
+            if len(obj.vertex_groups) == 1 and 'Root' in obj.vertex_groups:
+                obj.vertex_groups.clear()
 
             for m in obj.modifiers:
                 if m.type == 'ARMATURE' and not m.object:
@@ -338,6 +341,11 @@ def import_and_setup_single_dae(context,  filepath, filename, asset_name, parent
 def import_and_merge_fbx_data(context, *, dae_objs, dae_path, asset_name):
     """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
     fbx_path = dae_path.replace(".dae", ".fbx")
+    if not os.path.isfile(fbx_path):
+        return dae_objs
+    armatures_to_replace = [a for a in dae_objs if a.type=='ARMATURE' if len(a.pose.bones) > 1 or 'Root' not in a.pose.bones]
+    if not armatures_to_replace:
+        return dae_objs
     fbx_objects = import_fbx(context, fbx_path, discard_types=('EMPTY'))
     if not fbx_objects:
         return
@@ -371,36 +379,7 @@ def import_and_merge_fbx_data(context, *, dae_objs, dae_path, asset_name):
 
     for fbx_arm in fbx_armatures:
         fbx_arm.name = "RIG-"+asset_name
-
-        if 'Root' not in fbx_arm.data.bones:
-            # Root bone needs to exist for animations to work.
-            context.view_layer.objects.active = fbx_arm
-            bpy.ops.object.mode_set(mode='EDIT')
-            root = fbx_arm.data.edit_bones.new(name="Root")
-            root.tail.y = 1
-            for eb in fbx_arm.data.edit_bones:
-                if not eb.parent and eb != root:
-                    eb.parent = root
-            bpy.ops.object.mode_set(mode='OBJECT')
-
-        for pb in fbx_arm.pose.bones:
-            pb.custom_shape = ensure_widget('Bone')
-            if "Root" in pb.name:
-                pb.custom_shape = ensure_widget('Root')
-                pb.use_custom_shape_bone_size = False
-                if pb.name in ("Face_Root"):
-                    for child_pb in pb.children_recursive:
-                        child_pb.custom_shape_scale_xyz *= 0.1
-            if "_Controled" in pb.name:
-                # Found in Hylian heads, eg. "Neck_Controled", "Head_Controled"
-                # Probably referring to the fact that in the game engine, 
-                # these bones are constrained to another armature's bones of the same name.
-                pb.name = pb.name.replace("_Controled", "")
-            else:
-                if any([pb.name.endswith(suf) for suf in ("_R", "_FR", "_BR", "_R_1", "_R_2")]):
-                    pb.custom_shape_rotation_euler.z = 0
-                else:
-                    pb.custom_shape_rotation_euler.z = -pi
+        cleanup_fbx_armature(context, fbx_arm)
 
     ret_objs += fbx_armatures
     
@@ -443,6 +422,57 @@ def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = (
                     m['import_name'] = orig_name
                 m.name += suffix
     return context.selected_objects[:]
+
+def cleanup_fbx_armature(context, fbx_arm):
+    assert fbx_arm.visible_get()
+
+    root = fbx_arm.data.bones.get("Root")
+
+    if not root or root.tail_local != Vector((0, 1, 0)):
+        # Root bone needs to exist for animations to work.
+        context.view_layer.objects.active = fbx_arm
+        bpy.ops.object.mode_set(mode='EDIT')
+        root_eb = fbx_arm.data.edit_bones.get("Root")
+        if not root_eb:
+            root_eb = fbx_arm.data.edit_bones.new(name="Root")
+        root_eb.head = Vector((0, 0, 0))
+        root_eb.tail = Vector((0, 1, 0))
+        root_eb.roll = 0
+        for eb in fbx_arm.data.edit_bones:
+            if not eb.parent and eb != root_eb:
+                eb.parent = root_eb
+        bpy.ops.object.mode_set(mode='OBJECT')
+        root = fbx_arm.data.bones["Root"]
+
+    root_pb = fbx_arm.pose.bones['Root']
+    root_pb.custom_shape = ensure_widget('Root')
+    root_pb.use_custom_shape_bone_size = False
+    root_pb.custom_shape_scale_xyz = [max(fbx_arm.dimensions)/2]*3
+    root_pb.custom_shape_rotation_euler = Euler()
+
+    fbx_arm.show_in_front = False
+    if fbx_arm.animation_data and fbx_arm.animation_data.action:
+        fbx_arm.animation_data.action = None
+
+    for pb in fbx_arm.pose.bones:
+        pb.matrix_basis.identity()
+        pb.custom_shape = ensure_widget('Bone')
+        if "Root" in pb.name:
+            pb.custom_shape = ensure_widget('Root')
+            pb.use_custom_shape_bone_size = False
+            if pb.name in ("Face_Root"):
+                for child_pb in pb.children_recursive:
+                    child_pb.custom_shape_scale_xyz *= 0.1
+        if "_Controled" in pb.name:
+            # Found in Hylian heads, eg. "Neck_Controled", "Head_Controled"
+            # Probably referring to the fact that in the game engine, 
+            # these bones are constrained to another armature's bones of the same name.
+            pb.name = pb.name.replace("_Controled", "")
+        else:
+            if any([pb.name.endswith(suf) for suf in ("_R", "_FR", "_BR", "_R_1", "_R_2")]):
+                pb.custom_shape_rotation_euler.z = 0
+            else:
+                pb.custom_shape_rotation_euler.z = -pi
 
 def get_textures_used_by_dae(filepath) -> dict[str, list[str]]:
     content = ""
@@ -853,7 +883,6 @@ def hookup_texture_nodes(collection, material, shader_node, socket_map) -> bool:
         if socket_name != 'Albedo' and pixel_image.is_single_color:
             # If the whole image is just one color, use an RGB node instead.
             img_node = nodes.new(type="ShaderNodeRGB")
-            print(img.name)
             img_node.outputs[0].default_value = pixel_image.pixels_rgba[0]
         else:
             img_node = nodes.new(type="ShaderNodeTexImage")
@@ -908,12 +937,15 @@ def hookup_texture_nodes(collection, material, shader_node, socket_map) -> bool:
             print_later(f"Shader socket already taken: '{material.name}' -> '{img.name}' ({socket_name})")
 
         if is_transparent(material) != False:
-            material.surface_render_method = 'BLENDED'
+            material.surface_render_method = get_alpha_mode(material)
         # Since transparency doesn't (always) get its own texture node, hook up the Alpha of the Albedo.
+        alpha_socket = shader_node.inputs.get('Alpha')
         if socket_name in ('Albedo', 'Fx Texture Distorted') and is_transparent(material) and pixel_image.has_alpha:
-            alpha_socket = shader_node.inputs.get('Alpha')
             if alpha_socket and len(alpha_socket.links) == 0 and 'Alpha' in img_node.outputs:
                 links.new(img_node.outputs['Alpha'], alpha_socket)
+        # But if after those steps we didn't hook up any alpha, don't set it to Blended, since that will cause sorting issues.
+        if not alpha_socket or len(alpha_socket.links) == 0:
+            material.surface_render_method = 'DITHERED'
 
     first_plugged_img = next((s.links[0].from_node for s in shader_node.inputs if len(s.links)>0 and s.links[0].from_node.type == 'TEX_IMAGE'), None)
     if first_plugged_img:
@@ -1140,10 +1172,10 @@ def get_tex_data(material, img) -> dict:
     return next((t for t in tex_maps if t['Name'] == Path(img.filepath).stem), {})
 
 def get_alpha_mode(material) -> str:
-    """This is unfortunately not useful.
-    The game uses the same Alpha blend mode for decals and objects with transparent edges; AlphaMask.
-    But in Blender, decals must be set to Blended, and other objects to Dithered, otherwise decals would 
-    get black z-fighting artifacts, and other objects would be weirdly translucent.
+    """Not as useful as I hoped.
+    The game uses the "AlphaMask" flag for both decals, and objects with transparent edges.
+    But in Blender, decals must be set to Blended, and other objects to Dithered. 
+    Otherwise, decals would get z-fighting artifacts, and other objects would be weirdly translucent.
 
     I just go with BLENDED because decals are more common. :(
     """
@@ -1153,7 +1185,11 @@ def get_alpha_mode(material) -> str:
     alpha_flag = shader_data['MaterialU']['RenderState']['_flags']
     
     zelda_blend_modes = ['Custom', 'Opaque', 'AlphaMask', 'Translucent']
-    blend_mode = zelda_blend_modes[alpha_flag]
+    blend_mode = 'Opaque'
+    if alpha_flag > len(zelda_blend_modes)-1:
+        print_later("Unknown alpha flag: ", material.name, alpha_flag)
+    else:
+        blend_mode = zelda_blend_modes[alpha_flag]
 
     return 'BLENDED' if blend_mode == 'Translucent' else 'DITHERED'
 

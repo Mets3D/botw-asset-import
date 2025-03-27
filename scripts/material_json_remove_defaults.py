@@ -52,9 +52,9 @@ def process_json_files(input_directory, output_directory, defaults):
     json_files = glob.glob(f"{input_directory}/*.json")  # Get all JSON files
 
     for i, filepath in enumerate(json_files):
-        print(filepath)
-        if i > 0:
-            break
+        print(f"{i}/{len(json_files)}: {filepath}")
+        # if i > 100:
+        #     break
         try:
             with open(filepath, "r", encoding="utf-8") as file:
                 data = json.load(file)

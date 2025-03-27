@@ -1,5 +1,46 @@
 
 TODO:
+    Material Analysis:
+        - It's almost done, just need to tidy up matparam by counting and getting the default values of those specific values without wildcarding them, and then adding those defaults into material_defaults.json.
+            - For example, an output I might expect is: `matparam.uk_user_data.ValueUint: "[0]",`
+        - Once this is done, any time the importer wants to access some shader data and it isn't found, look for it in material_defaults.json as fallback.
+
+        - uking_enable_wind_vtx_transform definitely defines whether a material is affected by wind. Huge win!!
+        - uking_enable_backface_modify might mean that a material should be double-sided.
+
+        - What samplers are included in a material could be of value:
+            "shaderassign.samplers._a0": "_a0",
+            "shaderassign.samplers._a1": "_a1",
+            "shaderassign.samplers._e0": "_e0",
+            "shaderassign.samplers._n0": "_n0",
+            "shaderassign.samplers._s0": "_s0",
+            "shaderassign.samplers._t0": "_t0",
+            "shaderassign.samplers._v0": "_v0",
+            "shaderassign.samplers.array0": "tma",
+            "shaderassign.samplers.array1": "tmc",
+            "shaderassign.samplers.grass_color": "grass_color",
+            "shaderassign.samplers.grass_lie": "grass_lie",
+            "shaderassign.samplers.grass_mow": "grass_mow",
+            "shaderassign.samplers.grass_mow_wide": "grass_mow_wide",
+            "shaderassign.samplers.grass_summary0": "grass_summary0",
+            "shaderassign.samplers.grass_summary1": "grass_summary1",
+            "shaderassign.samplers.grass_wind_swell": "grass_wind_swell",
+            "shaderassign.samplers.lumberjack_thickness": "_gn0",
+            "shaderassign.samplers.tera_height": "tera_height",
+            "shaderassign.samplers.tera_material": "tera_material",
+            "shaderassign.samplers.tera_material_linear": "tera_material_linear",
+            "shaderassign.samplers.tera_normal": "tera_normal",
+            "shaderassign.samplers.tera_route_curve": "tera_curve",
+            "shaderassign.samplers.tera_route_refer": "tera_refer",
+            "shaderassign.samplers.tera_water": "tera_water",
+            "shaderassign.samplers.uking_tex0": "sampler0",
+            "shaderassign.samplers.uking_tex1": "sampler0",
+
+        - See if we can figure out flow direction and speed of water and lava
+        - Figure out how we can tell if a material is a leaf/grass/etc that should be affected by wind, then write code that assigns the Fauna shader, sets the displacement mode, and connects the displacement.
+            - Additionally, if we could also figure out if a material is double-sided or not, that would be great.
+
+
     Might have to tweak all the fauna stuff, or just the file or idk: https://projects.blender.org/blender/blender/issues/136453#issuecomment-1529450
         - On every material that uses the Smooth Shade shader, set the displacement mode to Displacement+Bump
         - Connect the new Displacement output of the Smooth Shade shader to the material output.
@@ -27,15 +68,6 @@ TODO:
         Mipha
         Girly animations?
         Nude Link
-
-Material Analysis TODO:
-    - It's almost done, just need to tidy up matparam by counting and getting the default values of those specific values without wildcarding them, and then adding those defaults into material_defaults.json.
-        - For example, an output I might expect is: `matparam.uk_user_data.ValueUint: "[0]",`
-    - Once this is done, any time the importer wants to access some shader data and it isn't found, look for it in material_defaults.json as fallback.
-
-    - See if we can figure out flow direction and speed of water and lava
-    - Figure out how we can tell if a material is a leaf/grass/etc that should be affected by wind, then write code that assigns the Fauna shader, sets the displacement mode, and connects the displacement.
-        - Additionally, if we could also figure out if a material is double-sided or not, that would be great.
 
 Map Importer TODO:
     - Organize Enemies, NPcs, Animals into separate collections so they can be disabled easily.

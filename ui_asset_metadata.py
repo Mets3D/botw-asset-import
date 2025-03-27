@@ -11,6 +11,8 @@ def draw_more_metadata(self, context):
         if not asset:
              return
 
+        layout.label(text=f"{len(context.selected_assets)} selected.")
+
         header, panel = layout.panel("More Asset Metadata", default_closed=True)
         header.label(text="More")
         if not panel:

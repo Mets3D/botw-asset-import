@@ -1,8 +1,10 @@
-import json, re
+import re
 
 # Modified from bmubin: https://github.com/augmero/bmubin/blob/main/scripts/asset/dae_fixer.py
 # I don't bother changing texture paths, since I take care of that in load_assigned_dae_textures() instead.
 # I also don't make copies of the .dae files but modify them in place because YOLO.
+# I also don't do it as a separate step which would be more optimal, but instead do it every time I import, which is more convenient. 
+# (ofc processing a given .dae file a 2nd or 3rd time won't do anything anymore.)
 
 def fix_dae_uvmaps_in_place(dae_file_path):
     lines_to_write = []

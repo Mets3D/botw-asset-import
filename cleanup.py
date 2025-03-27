@@ -4,9 +4,8 @@ from bpy.props import BoolProperty
 from mathutils import Matrix, Vector, Euler
 from math import pi
 
-from .widgets import ensure_widget
 from .op_thumbnail_from_viewport import crop_asset_preview
-from .botw_batch_fbx_import import PRIMITIVE_NAMES, GARBAGE_MATS, fix_material_settings, get_albedo_img_node, set_object_color, ensure_nodetree
+from .botw_batch_fbx_import import PRIMITIVE_NAMES, GARBAGE_MATS, fix_material_settings, get_albedo_img_node, set_object_color, ensure_nodetree, cleanup_fbx_armature
 from .asset_names import asset_names
 
 from .utils.collections import find_layer_collection_by_collection
@@ -23,8 +22,7 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
 
     apply_transforms: BoolProperty(name="Apply Transforms")
 
-    ensure_root_bones: BoolProperty(name="Ensure Root Bones")
-    reset_bone_transforms: BoolProperty(name="Reset Bone Transforms")
+    cleanup_armatures: BoolProperty(name="Cleanup Armatures", description="Ensure root bones with correct orientation, assign bone shapes, unassign actions, reset bone transforms.")
     link_bone_widgets: BoolProperty(name="Link Bone Widgets")
     remove_single_bones: BoolProperty(name="Remove 1-Bone Armatures")
 
@@ -54,8 +52,7 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
             panel.prop(self, 'report_issues')
             panel.prop(self, 'reveal_asset_collections')
             panel.prop(self, 'link_bone_widgets')
-            panel.prop(self, 'reset_bone_transforms')
-            panel.prop(self, 'ensure_root_bones')
+            panel.prop(self, 'cleanup_armatures')
             panel.prop(self, 'organize_by_catalogs')
 
         header, panel = layout.panel(idname="Cleanup (Expensive)")
@@ -80,18 +77,16 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
             panel.prop(self, 'rename_materials')
 
     def execute(self, context):
-        if self.apply_transforms or self.ensure_root_bones:
+        if self.apply_transforms or self.cleanup_armatures:
             reveal_all_collections(context)
 
         if self.apply_transforms:
             apply_transforms(context)
             context.view_layer.update()
-        if self.ensure_root_bones:
-            ensure_root_bones(context)
-        if self.reset_bone_transforms:
-            reset_bone_transforms(context)
+        if self.cleanup_armatures:
+            cleanup_armatures(context)
         if self.link_bone_widgets:
-            link_bone_widgets(context)
+            link_bone_widgets()
         if self.clean_animations:
             for a in bpy.data.actions:
                 removed_count = remove_negative_frames(a)
@@ -139,6 +134,7 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
         deduplicate_UV_nodes()
         remove_dead_modifiers()
         rename_controlled_bones()
+        fix_transparency()
 
         if self.rename_ids:
             rename_ids()
@@ -147,6 +143,22 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
 
         self.report({'INFO'}, "Cleanup complete.")
         return {'FINISHED'}
+
+def fix_transparency():
+    for mat in bpy.data.materials:
+        if not mat.use_nodes:
+            continue
+        nodes = mat.node_tree.nodes
+        shader_node = next((n for n in nodes if n.type=='GROUP'), None)
+        if not shader_node:
+            continue
+        alpha_socket = shader_node.inputs.get("Alpha")
+        if not alpha_socket:
+            continue
+        if len(alpha_socket.links) == 0 and mat.surface_render_method=='BLENDED':
+            mat.surface_render_method = 'DITHERED'
+            mat.use_transparency_overlap = False
+            print("Fix transparency overlap: ", mat.name)
 
 def rename_materials_to_albedo():
     for mat in bpy.data.materials:
@@ -346,56 +358,14 @@ def apply_transforms(context):
         o.select_set(True)
     bpy.ops.object.transform_apply()
 
-def ensure_root_bones(context):
+def cleanup_armatures(context):
     print("Ensure root bones")
     for o in bpy.data.objects:
         if o.type != 'ARMATURE':
             continue
-        root = o.data.bones.get("Root")
-        if not root or root.tail_local != Vector((0, 1, 0)):
-            with context.temp_override(object=o, active_object=o):
-                bpy.context.view_layer.objects.active = o
-                bpy.ops.object.mode_set(mode='EDIT')
+        cleanup_fbx_armature(context, o)
 
-                root = o.data.edit_bones.get("Root")
-                if not root:
-                    root = o.data.edit_bones.new(name="Root")
-                    root.tail.y = 1
-                    print("Created root bone for ", o.name)
-                if root.tail != Vector((0, 1, 0)):
-                    root.head = Vector((0, 0, 0))
-                    root.tail = Vector((0, 1, 0))
-                    root.roll = 0
-                    print("Rotated root bone: ", o.name)
-
-                for eb in o.data.edit_bones:
-                    if not eb.parent and eb != root:
-                        eb.parent = root
-
-                bpy.ops.object.mode_set(mode='OBJECT')
-
-        root = o.pose.bones['Root']
-        root.custom_shape = ensure_widget('Root')
-        root.use_custom_shape_bone_size = False
-        root.custom_shape_scale_xyz = [max(o.dimensions)/2]*3
-        root.custom_shape_rotation_euler = Euler()
-
-def reset_bone_transforms(context):
-    for o in bpy.data.objects:
-        if o.type != 'ARMATURE':
-            continue
-        o.show_in_front = False
-        if o.animation_data and o.animation_data.action:
-            o.animation_data.action = None
-            print("Cleared action: ", o.name)
-        for pb in o.pose.bones:
-            pb.matrix_basis.identity()
-            if any([pb.name.endswith(suf) for suf in ("_R", "_FR", "_BR", "_R_1", "_R_2")]):
-                pb.custom_shape_rotation_euler.z = 0
-            else:
-                pb.custom_shape_rotation_euler.z = -pi
-
-def link_bone_widgets(context):
+def link_bone_widgets():
     blend_path = bpy.data.filepath
     res_path = os.path.join(os.path.dirname(blend_path), "resources.blend")
     rel_path = bpy.path.relpath(res_path)

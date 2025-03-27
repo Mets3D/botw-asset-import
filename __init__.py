@@ -21,6 +21,7 @@ module_names = (
     "dae_fixer",
     "ui_asset_metadata",
     "cleanup",
+    "map_data_import",
 )
 
 

@@ -2,8 +2,8 @@ import bpy, os
 from bpy.types import Object
 
 def get_resources_blend_path() -> str:
-    filedir = os.path.dirname(os.path.realpath(__file__))
-    blend_path = os.sep.join([filedir, 'resources.blend'])
+    addon_dir = os.sep.join(os.path.dirname(os.path.realpath(__file__)).split(os.sep)[:-1])
+    blend_path = os.sep.join([addon_dir, 'resources.blend'])
     return blend_path
 
 def ensure_widget(wgt_name, link=False, source_file="") -> Object:

@@ -4,10 +4,12 @@ module_names = (
     "action",
     "catalogs",
     "collections",
+    "dae_fixer",
     "deduplicate_materials",
+    "pixel_image",
     "progressbar",
     "timer",
-    "pixel_image",
+    "widgets",
 )
 
 

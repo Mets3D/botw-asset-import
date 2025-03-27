@@ -96,7 +96,7 @@ class ASSET_OT_crop_asset_thumbnails(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        if not context.selected_ids:
+        if not hasattr(context, 'selected_ids') or not context.selected_ids:
             cls.poll_message_set("No selected assets.")
             return False
         return True

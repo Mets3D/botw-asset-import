@@ -1,4 +1,4 @@
-import bpy, os, re, json
+import bpy, os, re, json, zipfile, io
 from collections import OrderedDict
 from math import pi
 from pathlib import Path
@@ -31,8 +31,17 @@ TEX_SUFFIXES = ["_Alb", "_Spm", "_Nrm", "_Emm", "_Emm", "_Clr", "_Mtl"]
 
 METAL_ROUGHNESS = 0.6
 
+THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
+ADDON_DIR = os.sep.join(THIS_FOLDER.split(os.sep)[:-1])
+MATERIAL_DATA_ZIP = os.path.join(ADDON_DIR, "databases", "materials.zip")
+MATERIAL_DEFAULTS_JSON = os.path.join(ADDON_DIR, "databases", "material_defaults.json")
+
+with open(MATERIAL_DEFAULTS_JSON, "r", encoding="utf-8") as f:
+    DEFAULT_MATERIAL = json.load(f)
+
 _shader_data_cache = {}
 _image_path_cache = {}
+
 def cache_image_paths() -> dict[str, str]:
     """Create a mapping from image names to full filepaths in the Game Models folder."""
 
@@ -261,7 +270,7 @@ def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll
 
     with Timer("Import .dae + .fbx", asset_name):
         objs = import_dae(context, full_path, discard_types=('EMPTY'))
-        objs = import_and_merge_fbx_data(context, dae_objs=objs, dae_path=full_path, asset_name=asset_name)
+        objs = import_and_merge_fbx_armature(context, dae_objs=objs, dae_path=full_path, asset_name=asset_name)
     if not objs:
         return []
 
@@ -275,10 +284,6 @@ def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll
         if os.path.exists(icon_filepath):
             with context.temp_override(**override):
                 bpy.ops.ed.lib_id_load_custom_preview(filepath=icon_filepath)
-
-    json_base_path = os.path.dirname(full_path)
-    if prefs.game_models_folder:
-        json_base_path = os.path.join(prefs.game_models_folder, dirname)
 
     dae_textures = get_textures_used_by_dae(full_path)
     for obj in context.selected_objects:
@@ -319,14 +324,13 @@ def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll
 
             for m in obj.data.materials:
                 m['dae_textures'] = dae_textures.get(m['import_name'], [])
-                json_filepath = os.path.join(json_base_path, collection['file_name'] + "_" + m['import_name'] + ".json")
-                if os.path.isfile(json_filepath):
-                    with open(json_filepath, 'r') as json_file:
-                        json_data = json.load(json_file)
-                        json_data = tweak_material_json(json_data)
-                        # Store as string because Blender doesn't let us store 
-                        # an arbitrary structure of lists/dicts.
-                        m['shader_data'] = json.dumps(json_data)
+                json_mat_name = collection['file_name'] + "_" + m['import_name'] + ".json"
+                m['json_name'] = json_mat_name
+                mat_data = load_material_data(json_mat_name)
+                if mat_data:
+                    # Store as string because Blender doesn't let us store 
+                    # an arbitrary structure of lists/dicts.
+                    m['shader_data'] = json.dumps(mat_data)
                 else:
                     print_later(f"Couldn't find material .json: {json_filepath}")
 
@@ -339,51 +343,39 @@ def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll
 
     return context.selected_objects[:]
 
-def import_and_merge_fbx_data(context, *, dae_objs, dae_path, asset_name):
+def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, asset_name):
     """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
+    dae_armatures = [ob for ob in dae_objs if ob.type=='ARMATURE']
+    if not dae_armatures:
+        return dae_objs
+
     fbx_path = dae_path.replace(".dae", ".fbx")
     if not os.path.isfile(fbx_path):
         return dae_objs
     armatures_to_replace = [a for a in dae_objs if a.type=='ARMATURE' if len(a.pose.bones) > 1 or 'Root' not in a.pose.bones]
     if not armatures_to_replace:
         return dae_objs
-    fbx_objects = import_fbx(context, fbx_path, discard_types=('EMPTY'))
-    if not fbx_objects:
+    fbx_armatures = import_fbx(context, fbx_path, discard_types=('EMPTY', 'MESH'))
+    if not fbx_armatures:
         return
-    fbx_armatures = [o for o in fbx_objects if o.type == 'ARMATURE']
-
-    if not fbx_objects:
-        print_later(f"Couldn't find .fbx file for {dae_path}")
-        return dae_objs
 
     ret_objs = dae_objs[:]
 
-    for dae_obj in dae_objs:
-        dae_obj.select_set(True)
-        if dae_obj.type != 'MESH':
-            continue
-        fbx_obj = bpy.data.objects.get(dae_obj.name.replace("_dae", "_fbx"))
-        if not fbx_obj:
-            continue
-        for dae_mat, fbx_mat in zip(dae_obj.data.materials, fbx_obj.data.materials):
-            dae_mat.user_remap(fbx_mat)
-            fbx_mat.name = fbx_mat.name.replace("_fbx", "")
-        dae_obj.name = dae_obj.name.replace("_dae", "")
-        bpy.data.objects.remove(fbx_obj)
 
-    dae_armatures = [ob for ob in context.selected_objects if ob.type=='ARMATURE']
+    assert len(fbx_armatures) == len(dae_armatures) == 1
 
-    for fbx_arm, dae_arm in zip(fbx_armatures, dae_armatures):
-        dae_arm.user_remap(fbx_arm)
-        ret_objs.remove(dae_arm)
-        bpy.data.objects.remove(dae_arm)
+    fbx_arm = fbx_armatures[0]
+    dae_arm = dae_armatures[0]
+    dae_arm.user_remap(fbx_arm)
+    ret_objs.remove(dae_arm)
+    bpy.data.objects.remove(dae_arm)
 
     for fbx_arm in fbx_armatures:
         fbx_arm.name = "RIG-"+asset_name
         cleanup_fbx_armature(context, fbx_arm)
 
     ret_objs += fbx_armatures
-    
+
     return ret_objs
 
 def import_fbx(context, filepath, discard_types=('MESH', 'EMPTY')):
@@ -394,7 +386,6 @@ def import_dae(context, filepath, discard_types=('EMPTY')):
     return import_dae_or_fbx(context, is_dae=True, filepath=filepath, discard_types=discard_types)
 
 def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = ('EMPTY')):
-    suffix = "_dae" if is_dae else "_fbx"
 
     # Both of these functions take a "filepath" property, 
     # and both load the contents to the active collection and select all objects.
@@ -413,7 +404,6 @@ def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = (
         if ob.type in discard_types:
             bpy.data.objects.remove(ob)
             continue
-        ob.name += suffix
         if ob.type == 'MESH':
             for m in ob.data.materials:
                 if 'import_name' not in m:
@@ -421,7 +411,6 @@ def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = (
                     if len(orig_name) > 4 and orig_name[-4] == ".":
                         orig_name = orig_name[:-4]
                     m['import_name'] = orig_name
-                m.name += suffix
     return context.selected_objects[:]
 
 def cleanup_fbx_armature(context, fbx_arm):
@@ -578,8 +567,7 @@ def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
     if not shader_data:
         return socket_map
     texture_maps = shader_data["TextureMaps"]
-    for tex_data in texture_maps:
-        name = tex_data['Name']
+    for name, tex_data in texture_maps.items():
         if name in ('MaterialAlb', 'MaterialCmb'):
             continue
         img = ensure_loaded_img(name)
@@ -587,7 +575,7 @@ def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
             print_later(f"Couldn't find texture: '{material.name}' -> {name}")
             missing_tex_from_json.append(name)
             continue
-        type = tex_data['Type'].strip()
+        type = tex_data.get('Type', "Diffuse").strip()
 
         if type == 'Unknown':
             sampler = tex_data['SamplerName']
@@ -664,7 +652,7 @@ def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
     # texture_array_index has 6 integers between 0-82.
     # These definitely correspond directly to the textures inside content/Terrain,
     # and their order seems to matter too.
-    matparam = shader_data.get('matparam')
+    matparam = shader_data['matparam']
     tex_array_index_props = []
 
     shaderoptions = shader_data['shaderassign']['options']
@@ -737,6 +725,8 @@ def init_nodetree(material, shader_name) -> bpy.types.ShaderNode:
     output_node.location = (600, 0)
     output_node.name = "BotW Output"
     links.new(shader_node.outputs[0], output_node.inputs[0])
+    if 'Displacement' in shader_node.outputs:
+        links.new(shader_node.outputs['Displacement'], output_node.inputs['Displacement'])
 
     return shader_node
 
@@ -773,24 +763,6 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
                     img.user_remap(img)
                 if "_alb" in img.name.lower():
                     albedo = img
-
-    def increment_name(name: str, increment=1, default_zfill=1) -> str:
-        # Increment LAST number in the name.
-        # Negative numbers will be clamped to 0.
-        # Digit length will be preserved, so 10 will decrement to 09.
-        # 99 will increment to 100, not 00.
-
-        # If no number was found, one will be added at the end of the base name.
-        # The length of this in digits is set with the `default_zfill` param.
-
-        numbers_in_name = re.findall(r'\d+', name)
-        if not numbers_in_name:
-            return name + str(max(0, increment)).zfill(default_zfill)
-
-        last = numbers_in_name[-1]
-        incremented = str(max(0, int(last) + increment)).zfill(len(last))
-        split = name.rsplit(last, 1)
-        return incremented.join(split)
 
     # Find all other textures with the same base name.
     guessed_textures = []
@@ -844,6 +816,14 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
         shader_name = "BotW: Divine Eye"
     elif any(["clrmak" in img.name.lower() or "clrmsk" in img.name.lower() for img in all_textures]):
         shader_name = "BotW: Generic NPC"
+
+    shader_data = get_shader_data(material)
+    try:
+        if shader_data['shaderassign']['options']['uking_enable_wind_vtx_transform'] == 1:
+            shader_name = "BotW: Fauna"
+            material.displacement_method = 'BOTH'
+    except:
+        pass
 
     if len(obj.data.color_attributes) > 0 and shader_name != "BotW: Material Blend" and len([socket for socket in socket_map.keys() if 'Albedo' in socket]) > 1:
         shader_name = "BotW: Material Blend"
@@ -1155,42 +1135,66 @@ def ensure_UV_node(material, img_node, shader_name):
                 set_socket_value(pingpong_node, 'PingPong Y', True)
             links.new(pingpong_node.outputs[0], img_node.inputs[0])
 
+def load_material_data(json_name):
+    # This database was generated by me based on my custom build of 
+    # Switch Toolbox and the material_json scripts found in this repo.
+
+    global _shader_data_cache
+    if not _shader_data_cache:
+        with open(MATERIAL_DATA_ZIP, "rb") as f:
+            zip_data = f.read()
+
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
+            for file_name in z.namelist():
+                with z.open(file_name) as file:
+                    _shader_data_cache[file_name] = json.loads(file.read())
+
+    # Combine the shader data on top of the default material values.
+    # NOTE: I commented this out because the default values are kinda meaningless and I worry adding them here is an unnecessary memory cost.
+    # return {**DEFAULT_MATERIAL, **shader_data}
+
+    return _shader_data_cache.get(json_name, {})
+
 def get_shader_data(material) -> dict:
     """Tried to optimize json loading by caching but it's insignificant."""
-    if 'shader_data' not in material:
+    if 'json_name' not in material:
         print_later("No shader data: ", material)
         return {}
-    global _shader_data_cache
-    if material.name not in _shader_data_cache:
-        _shader_data_cache[material.name] = json.loads(material['shader_data'])
-    return _shader_data_cache[material.name]
+    return load_material_data(material['json_name'])
 
 def get_tex_data(material, img) -> dict:
     shader_data = get_shader_data(material)
     if not shader_data:
         return {}
     tex_maps = shader_data['TextureMaps']
-    return next((t for t in tex_maps if t['Name'] == Path(img.filepath).stem), {})
+    return next((data for name, data in tex_maps.items() if name == Path(img.filepath).stem), {})
 
 def get_alpha_mode(material) -> str:
     """Not as useful as I hoped.
-    The game uses the "AlphaMask" flag for both decals, and objects with transparent edges.
+    The game uses the "AlphaMask" mode for both decals, and objects with transparent edges.
     But in Blender, decals must be set to Blended, and other objects to Dithered. 
     Otherwise, decals would get z-fighting artifacts, and other objects would be weirdly translucent.
-
-    I just go with BLENDED because decals are more common. :(
+    TODO: I think decals (that have z-fighting issues) might have a shading flag that we could use to apply a displacement material to resolve the z-fighting.
     """
+
     shader_data = get_shader_data(material)
     if not shader_data:
         return 'DITHERED'
-    alpha_flag = shader_data['MaterialU']['RenderState']['_flags']
-    
-    zelda_blend_modes = ['Custom', 'Opaque', 'AlphaMask', 'Translucent']
+    try:
+        alpha_flag = shader_data['MaterialU']['RenderState']['_flags']
+    except:
+        alpha_flag = 1
+
+    # These are complete guesses atm. TODO: improve this mapping.
+    zelda_blend_modes = {
+        1: 'Opaque',        # 13553 cases
+        2: 'AlphaMask',     # 3785 cases
+        16: 'Custom',       # 108 cases
+        16: 'Translucent',  # 1249 cases
+        19: 'Unknown',      # 165 cases
+    }
     blend_mode = 'Opaque'
-    if alpha_flag > len(zelda_blend_modes)-1:
-        print_later("Unknown alpha flag: ", material.name, alpha_flag)
-    else:
-        blend_mode = zelda_blend_modes[alpha_flag]
+    blend_mode = zelda_blend_modes.get(alpha_flag, "AlphaMask")
 
     return 'BLENDED' if blend_mode == 'Translucent' else 'DITHERED'
 
@@ -1207,8 +1211,12 @@ def texture_uses_first_uvmap(material, img) -> bool or None:
     shader_data = get_shader_data(material)
     if not shader_data:
         return None
-    shader_options = shader_data['shaderassign']['options']
-    # For TotK, this might have to be `o_texture{tex_idx}_texcoord``, but I never tried.
+    try:
+        shader_options = shader_data['shaderassign']['options']
+    except:
+        return None
+
+    # NOTE: For TotK, this might have to be `o_texture{tex_idx}_texcoord``, but I never tried.
     uv_idx = shader_options.get(f'uking_texture{tex_idx}_texcoord')
     return uv_idx == 0
 
@@ -1249,15 +1257,23 @@ def get_color_values(material) -> list[Vector]:
         if name.startswith("const_color"):
             vec = Vector((data['ValueFloat']))
             vec.normalize()
-            if vec[0] != vec[1] != vec[2]:
-                colors.append(vec)
+            colors.append(vec)
     return colors
 
 def is_transparent(material) -> bool or None:
     shader_data = get_shader_data(material)
     if not shader_data:
         return None
-    return shader_data['isTransparent']
+    return shader_data.get('isTransparent', False)
+
+def is_doublesided(material):
+    shader_data = get_shader_data(material)
+    if not shader_data:
+        return None
+    try: 
+        return shader_data['shaderassign']['options']['uking_enable_backface_modify'] == 1
+    except:
+        return True
 
 def ensure_loaded_img(img_name):
     if not img_name.endswith(TEXTURE_EXTENSION):
@@ -1334,6 +1350,9 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         set_socket_value(shader_node, "Transparent Edges", is_transparent(material))
         ensure_edge_attribute(bpy.context, obj)
 
+    if shader_node.node_tree.name == 'BotW: Fauna':
+        set_socket_value(shader_node, "Double Sided", is_doublesided(material))
+
     for socket_name, value in (('Rubber', rubber), ('Metal', metal), ('Hair', hair)):
         set_socket_value(shader_node, socket_name, value)
 
@@ -1393,37 +1412,25 @@ def refresh_images():
             if n.type == 'TEX_IMAGE':
                 n.image = n.image
 
-def tweak_material_json(data):
-    """Recursively convert string numbers to integers where possible."""
-    if isinstance(data, dict):
-        return {str(key): tweak_material_json(value) for key, value in data.items()}
-    elif isinstance(data, list):
-        return [tweak_material_json(item) for item in data]
-    elif isinstance(data, str) and (data.isdigit() or (data.startswith('-') and data[1:].isdigit())):
-        num = int(data)
-        return num
-
-    return data
-
-def fix_material_settings(m):
-    if m.library:
+def fix_material_settings(mat):
+    if mat.library:
         return
-    m.metallic = 0
-    m.roughness = 0.8
-    m.diffuse_color = [0.8, 0.8, 0.8, 1.0]
-    if not m.use_nodes:
+    mat.metallic = 0
+    mat.roughness = 0.8
+    mat.diffuse_color = [0.8, 0.8, 0.8, 1.0]
+    if not mat.use_nodes:
         return
-    albedo_node = get_albedo_img_node(m)
+    albedo_node = get_albedo_img_node(mat)
     if albedo_node:
-        m.node_tree.nodes.active = albedo_node
-    average_color = get_average_albedo_color(m)
+        mat.node_tree.nodes.active = albedo_node
+    average_color = get_average_albedo_color(mat)
     if average_color:
         average_color = Color(average_color[:3])
         if average_color.s < 0.4:
             average_color.s = 0.4
         if average_color.v < 0.4:
             average_color.v = 0.4
-        m.diffuse_color = (average_color.r, average_color.g, average_color.b, 1.0)
+        mat.diffuse_color = (average_color.r, average_color.g, average_color.b, 1.0)
 
 def set_object_color(obj):
     if obj.type != 'MESH':
@@ -1474,7 +1481,8 @@ def get_albedo_img_node(material) -> bpy.types.ShaderNodeTexImage or None:
         return
     return albedo_node
 
-# Register the operator
+### Registry
+
 def menu_func_import(self, context):
     self.layout.operator(OUTLINER_OT_import_botw_dae_and_fbx.bl_idname, text="BotW (.dae & .fbx)")
 

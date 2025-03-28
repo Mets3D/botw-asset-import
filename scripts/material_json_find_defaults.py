@@ -31,13 +31,16 @@ def count_values(data, counts, path=""):
             return
         counts[path][data] += 1  # Count occurrences of values per key path
 
+def get_json_list(directory):
+    json_files = glob.glob(f"{directory}/*.json")
+    json_files = [f for f in json_files if not f.endswith('SceneMaterial_MasterMaterial.json') and not os.path.basename(f).startswith("Deferred")]
+    return json_files
+
 def process_json_files(directory):
     """Processes all JSON files in the given directory with a simple progress counter."""
     counts = defaultdict(lambda: defaultdict(int))
-    json_files = glob.glob(f"{directory}/*.json")
 
-    json_files = [f for f in json_files if not f.endswith('SceneMaterial_MasterMaterial.json') and not os.path.basename(f).startswith("Deferred")]
-
+    json_files = get_json_list(directory)
     total_files = len(json_files)
 
     for index, filepath in enumerate(json_files, start=1):
@@ -88,7 +91,7 @@ manual_default_overrides = {
     "MaterialU.ShaderParams.*.DependIndex": "IGNORE",
     "MaterialU.ShaderParams.*.DependedIndex": "IGNORE",
     "MaterialU.ShaderParams.*.Type": "IGNORE",
-    "TextureMaps.*.textureUnit": "IGNORE",
+    # "TextureMaps.*.textureUnit": "IGNORE",
     "matparam.*.DependIndex": "IGNORE",
     "matparam.*.DependedIndex": "IGNORE",
     "matparam.*.DataOffset": "IGNORE",
@@ -104,31 +107,57 @@ manual_default_overrides = {
 
     "matparam.*.ValueTexSrt.Mode": "ModeMaya",
     "matparam.*.ValueTexSrt.Scaling": "[0.0, 0.0]",
-    "matparam.*.ValueTexSrt.Rotation": "null",
+    # "matparam.*.ValueTexSrt.Rotation": "null",
     "matparam.*.ValueTexSrt.Translation": "[0.0, 0.0]",
 
     "matparam.*.ValueTexSrtEx.Mode": "ModeMaya",
     "matparam.*.ValueTexSrtEx.Scaling": "[0.0, 0.0]",
-    "matparam.*.ValueTexSrtEx.Rotation": "null",
+    # "matparam.*.ValueTexSrtEx.Rotation": "null",
     "matparam.*.ValueTexSrtEx.Translation": "[0.0, 0.0]",
-    "matparam.*.ValueTexSrtEx.MatrixPointer": "null",
+    # "matparam.*.ValueTexSrtEx.MatrixPointer": "null",
 
-    "matparam.*.Value_Unk": "null",
+    # "matparam.*.Value_Unk": "null",
     "matparam.*.ValueFloat": "[0.0]",
+    "matparam.*.HasPadding": "IGNORE",
+    # "matparam.*.PaddingLength": "IGNORE",
+
+    "MaterialU.ShaderParamData": "IGNORE",  # I don't know what this is and it's a lot of data, so meh.
+    "MaterialU.Name": "IGNORE", # Because it's always the same as "text". Also the same as the end of the filename, starting with Mt_ so, meh.
 }
+
+# Some values we want to be able to read without stressing about whether they exist or not.
+# Also they deviate from the most common value very often.
+force_no_default = [
+    "TextureMaps.*.Type",
+    "TextureMaps.*.textureUnit",
+    "TextureMaps.*.SamplerName",
+    "TextureMaps.*.WrapModeS",
+    "TextureMaps.*.WrapModeT",
+    "isTransparent",
+    "uking_texture_array_texture",
+    *[f"matparam.texture_array_index{i}.ValueFloat" for i in range(6)],
+    *[f"shaderassign.options.uking_texture_array_texture{i}" for i in range(6)],
+]
 
 # Usage
 directory = "D:\\BotW Assets\\Material Data Science\\converted" # the output of material_json_convert.py
 counts_file = "D:\\BotW Assets\\Material Data Science\\material_value_occurrences.json"
 defaults_file = "D:\\BotW Assets\\Material Data Science\\material_defaults.json"
-value_counts, num_files = process_json_files(directory)
 
-#json_files = glob.glob(f"{directory}/*.json")
-#num_files = len(json_files)
-#with open(counts_file, "r", encoding="utf-8") as file:
-#    value_counts = json.load(file)
+json_files = get_json_list(directory)
+num_files = len(json_files)
+with open(counts_file, "r", encoding="utf-8") as file:
+  value_counts = json.load(file)
+
+# value_counts, num_files = process_json_files(directory)
+# save_counts(value_counts, counts_file)
+
 
 defaults = get_default_values(value_counts, num_files-1)
 defaults.update(manual_default_overrides)
-save_counts(value_counts, counts_file)
+for key in force_no_default:
+    if key not in defaults:
+        print("Couldn't remove ", key)
+        continue
+    del defaults[key]
 save_defaults(defaults, defaults_file)

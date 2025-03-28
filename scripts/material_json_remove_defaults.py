@@ -1,14 +1,11 @@
-import json
-import glob
-import os
-import re
+import json, glob, os
 
 def load_defaults(default_file):
     """Loads the defaults from the defaults.json file."""
     with open(default_file, "r", encoding="utf-8") as file:
         return json.load(file)
 
-WILDCARDS = ("TextureMaps", "ShaderParams", "TextureRefs", "matparam", "Samplers")
+WILDCARDS = ("TextureMaps", "ShaderParams", "TextureRefs", "Samplers")
 
 def get_default_path(data_path):
     parts = data_path.split(".")
@@ -26,22 +23,25 @@ def remove_defaults(data, defaults, path=""):
             new_path = f"{path}.{key}" if path else key
             default_path = get_default_path(new_path)
 
-            ignore = False
-            for default_path in (new_path, default_path):
-                if default_path in defaults:
-                    default_value = defaults[default_path]
-                    if default_value in ('IGNORE', value, str(value)):
-                        ignore = True
-                        break
+            # I doubt None is ever useful / overriding anything. Removing them helps filter out a lot of noise.
+            ignore = value == None
+            if not ignore:
+                for default_path in (new_path, default_path):
+                    if default_path in defaults:
+                        default_value = defaults[default_path]
+                        if default_value in ('IGNORE', value, json.dumps(value)):
+                            ignore = True
+                            break
             if ignore:
                 continue
 
             cleaned_sub_data = remove_defaults(value, defaults, new_path)
-            if cleaned_sub_data:
+            if cleaned_sub_data != {}:
+                # NOTE: Important this only discards empty dictionaries, otherwise False or None values would get skipped when they shouldn't.
                 cleaned_data[key] = cleaned_sub_data
 
         return cleaned_data
-    
+
     return data
 
 def process_json_files(input_directory, output_directory, defaults):
@@ -53,26 +53,21 @@ def process_json_files(input_directory, output_directory, defaults):
 
     for i, filepath in enumerate(json_files):
         print(f"{i}/{len(json_files)}: {filepath}")
-        # if i > 100:
-        #     break
+        if i > 0:
+            return
         try:
             with open(filepath, "r", encoding="utf-8") as file:
                 data = json.load(file)
                 cleaned_data = remove_defaults(data, defaults)
-#                print(json.dumps(cleaned_data, indent=4))
-            
-            # Construct output file path
+
+            # Save the cleaned JSON to the output folder
             output_filepath = os.path.join(output_directory, os.path.basename(filepath))
-            
-            # Save the cleaned JSON to the new folder
             with open(output_filepath, "w", encoding="utf-8") as file:
-                json.dump(cleaned_data, file, indent=4, ensure_ascii=False)
+                json.dump(cleaned_data, file, indent=2, ensure_ascii=False)
         
         except json.JSONDecodeError:
             print(f"Error reading {filepath}")
 
-
-# Usage
 defaults_file = "D:\\BotW Assets\\Material Data Science\\material_defaults.json"
 input_directory = "D:\\BotW Assets\\Material Data Science\\converted" # the output of material_json_convert.py
 output_directory = "D:\\BotW Assets\\Material Data Science\\shrunk"

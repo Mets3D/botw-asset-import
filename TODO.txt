@@ -1,12 +1,18 @@
 
 TODO:
-    Material Analysis:
-        - It's almost done, just need to tidy up matparam by counting and getting the default values of those specific values without wildcarding them, and then adding those defaults into material_defaults.json.
-            - For example, an output I might expect is: `matparam.uk_user_data.ValueUint: "[0]",`
-        - Once this is done, any time the importer wants to access some shader data and it isn't found, look for it in material_defaults.json as fallback.
+    - Could optimize the importer by storing average texture colors in a json.
 
+    Material Analysis:
         - uking_enable_wind_vtx_transform definitely defines whether a material is affected by wind. Huge win!!
+            - Welp... This is now catching tree trunk materials as well.
+                - The tree trunk has lumberjack properties like uking_enable_lumberjack_trunk==1
+                - It also does not have uking_wind_vtx_transform_intensity, which the leaves have, with a value of 0.025! This is probably what we really need!
+            - And tree leaves need their custom normals to be removed.
+            - Tree leaves also have uking_enable_transmission==1
+            - Leaves also seem to be UVMapped such that the part that's touching the branches is at 0 Y. So we might want to mask the displacement by the UV Y value.
+
         - uking_enable_backface_modify might mean that a material should be double-sided.
+        - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece.
 
         - What samplers are included in a material could be of value:
             "shaderassign.samplers._a0": "_a0",

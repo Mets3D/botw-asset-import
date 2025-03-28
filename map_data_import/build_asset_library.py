@@ -12,15 +12,14 @@ from ..utils.collections import ensure_collection
 BLEND_DIR = "D:\\BotW Assets\\bmubin asset library\\assets"
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
-
-ADDON_DIR = os.sep.join(os.path.dirname(__file__).split(os.sep)[:-1])
+ADDON_DIR = os.sep.join(THIS_FOLDER.split(os.sep)[:-1])
+INSTANCE_CACHE_ZIP = os.path.join(ADDON_DIR, "databases", "world_instance_cache.zip")
 RESOURCE_BLEND = os.path.join(ADDON_DIR, "resources.blend")
 
 DEFAULT_BLEND = os.path.join(THIS_FOLDER, "asset_blank_file.blend")
 
 BLENDER = os.path.abspath(sys.argv[0])
 
-INSTANCE_CACHE_ZIP = os.path.join(ADDON_DIR, "databases", "world_instance_cache.zip")
 
 class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
     """Build asset cache one .blend per asset for importing bmubin's map data"""

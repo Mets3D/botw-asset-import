@@ -35,17 +35,40 @@ THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 ADDON_DIR = os.sep.join(THIS_FOLDER.split(os.sep)[:-1])
 MATERIAL_DATA_ZIP = os.path.join(ADDON_DIR, "databases", "materials.zip")
 MATERIAL_DEFAULTS_JSON = os.path.join(ADDON_DIR, "databases", "material_defaults.json")
+TEXTURE_INFO_JSON = os.path.join(ADDON_DIR, "databases", "texture_info.json")
 
-with open(MATERIAL_DEFAULTS_JSON, "r", encoding="utf-8") as f:
-    DEFAULT_MATERIAL = json.load(f)
+CACHE_mat_defaults = {}
+CACHE_tex_info = {}
+CACHE_shader_data = {}
+CACHE_image_paths = {}
 
-_shader_data_cache = {}
-_image_path_cache = {}
+def ensure_caches(force=False):
+    """Load a bunch of useful data into memory.
+    Only needs to be done once per Blender session.
+    Done when the the import operator is first used.
+    """
+    global CACHE_mat_defaults   # 18 kb
+    if not CACHE_mat_defaults or force:
+        with open(MATERIAL_DEFAULTS_JSON, "r", encoding="utf-8") as f:
+            CACHE_mat_defaults = json.load(f)
 
-def cache_image_paths() -> dict[str, str]:
+    global CACHE_tex_info   # 4.5 mb
+    if not CACHE_tex_info or force:
+        with open(TEXTURE_INFO_JSON, "r", encoding="utf-8") as f:
+            CACHE_tex_info = json.load(f)
+
+    global CACHE_image_paths    # a few kb
+    if not CACHE_image_paths or force:
+        cache_ensure_image_paths()
+
+    global CACHE_shader_data
+    if not CACHE_shader_data or force:
+        cache_ensure_shader_data()  # 100 mb
+
+def cache_ensure_image_paths() -> dict[str, str]:
     """Create a mapping from image names to full filepaths in the Game Models folder."""
 
-    global _image_path_cache
+    global CACHE_image_paths
     prefs = get_addon_prefs()
 
     for dirpath, _subfolders, files in os.walk(prefs.game_models_folder):
@@ -61,17 +84,28 @@ def cache_image_paths() -> dict[str, str]:
                 continue
 
             if file.lower().endswith(TEXTURE_EXTENSION):
-                _image_path_cache[file[:-len(TEXTURE_EXTENSION)]] = filepath
+                CACHE_image_paths[file[:-len(TEXTURE_EXTENSION)]] = filepath
 
-    return _image_path_cache
+    return CACHE_image_paths
+
+def cache_ensure_shader_data():
+    global CACHE_shader_data
+    if not CACHE_shader_data:
+        with open(MATERIAL_DATA_ZIP, "rb") as f:
+            zip_data = f.read()
+
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
+            for file_name in z.namelist():
+                with z.open(file_name) as file:
+                    CACHE_shader_data[file_name] = json.loads(file.read())
 
 def get_image_path(image_name: str) -> str:
-    if not _image_path_cache:
+    if not CACHE_image_paths:
         with Timer("Image path cache"):
-            cache_image_paths()
+            cache_ensure_image_paths()
     # Allow passing a full path, why not.
     image_name = Path(image_name).stem
-    return _image_path_cache.get(image_name, "")
+    return CACHE_image_paths.get(image_name, "")
 
 def print_later(*msg):
     PRINT_LATER.append("".join([str(m) for m in msg]))
@@ -86,6 +120,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     bl_options = {'REGISTER', 'UNDO'}
 
     directory: bpy.props.StringProperty(subtype='FILE_PATH', options={'SKIP_SAVE', 'HIDDEN'})
+    force_update_caches: bpy.props.BoolProperty(default=False)
 
     def execute(self, context):
         global PRINT_LATER
@@ -94,6 +129,9 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         if not self.directory:
             self.report({'WARNING'}, "No folder selected")
             return {'CANCELLED'}
+
+        with Timer("Load caches"):
+            ensure_caches(self.force_update_caches)
 
         ensure_botw_scene_settings(context)
 
@@ -131,6 +169,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         refresh_images()
 
         # Dump cache, otherwise it's easy to run out of RAM on subsequent imports.
+        # TODO: This might not be necessary now that we have texture_info.json. But keeping it also should do little harm.
         PixelImage.cache = {}
         Timer.summarize()
 
@@ -318,21 +357,21 @@ def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll
             if len(obj.vertex_groups) == 1 and 'Root' in obj.vertex_groups:
                 obj.vertex_groups.clear()
 
-            for m in obj.modifiers:
-                if m.type == 'ARMATURE' and not m.object:
-                    obj.modifiers.remove(m)
+            for mod in obj.modifiers:
+                if mod.type == 'ARMATURE' and not mod.object:
+                    obj.modifiers.remove(mod)
 
-            for m in obj.data.materials:
-                m['dae_textures'] = dae_textures.get(m['import_name'], [])
-                json_mat_name = collection['file_name'] + "_" + m['import_name'] + ".json"
-                m['json_name'] = json_mat_name
-                mat_data = load_material_data(json_mat_name)
+            for mat in obj.data.materials:
+                # mat['dae_textures'] = dae_textures.get(mat['import_name'], [])
+                json_mat_name = collection['file_name'] + "_" + mat['import_name'] + ".json"
+                mat['json_name'] = json_mat_name
+                mat_data = get_shader_data(mat)
                 if mat_data:
                     # Store as string because Blender doesn't let us store 
                     # an arbitrary structure of lists/dicts.
-                    m['shader_data'] = json.dumps(mat_data)
+                    mat['shader_data'] = json.dumps(mat_data)
                 else:
-                    print_later(f"Couldn't find material .json: {json_filepath}")
+                    print_later(f"Couldn't find material .json: {json_mat_name}")
 
             cleanup_mesh(collection, obj, asset_name)
 
@@ -563,12 +602,11 @@ def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
 
     missing_tex_from_json = []
     tex_from_json = []
-    shader_data = get_shader_data(material)
-    if not shader_data:
+    texture_maps = get_shader_property(material, 'TextureMaps')
+    if not texture_maps:
         return socket_map
-    texture_maps = shader_data["TextureMaps"]
     for name, tex_data in texture_maps.items():
-        if name in ('MaterialAlb', 'MaterialCmb'):
+        if name in ('MaterialAlb', 'MaterialCmb', 'ForReplace_Lumberjack'):
             continue
         img = ensure_loaded_img(name)
         if not img:
@@ -644,24 +682,18 @@ def load_assigned_dae_textures(material) -> OrderedDict[bpy.types.Image, str]:
 
 def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
     """Based on https://github.com/augmero/bmubin/blob/main/scripts/asset/shader_fixer.py"""
-    socket_map = OrderedDict()
-    shader_data = get_shader_data(material)
-    if not shader_data:
-        return socket_map
 
     # texture_array_index has 6 integers between 0-82.
     # These definitely correspond directly to the textures inside content/Terrain,
     # and their order seems to matter too.
-    matparam = shader_data['matparam']
     tex_array_index_props = []
-
-    shaderoptions = shader_data['shaderassign']['options']
     shader_array_index_props = []
 
     for i in range(5):
         # Skipping last value on purpose because it's the same value across the whole game.
-        tex_array_index_props.append(int(matparam[f'texture_array_index{i}']['ValueFloat'][0]))
-        shader_array_index_props.append(shaderoptions[f'uking_texture_array_texture{i}'])
+        val = get_shader_property(material, f'matparam.texture_array_index{i}.ValueFloat')
+        tex_array_index_props.append(val)
+        shader_array_index_props.append(get_shader_property(material, f'shaderassign.options.uking_texture_array_texture{i}'))
 
     all_default = all([v==-1 for v in shader_array_index_props])
     tex_indicies = []
@@ -681,10 +713,11 @@ def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
             continue
         tex_indicies.append(tex_index_value)
 
-    if not tex_indicies:
+    socket_map = OrderedDict()
+    if tex_indicies == []:
         return socket_map
 
-    material['tile_textures'] = tex_indicies
+    material['tile_textures'] = str(tex_indicies)
 
     alb_offset = 1
     nrm_offset = 1
@@ -770,7 +803,7 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
         textureset_name = albedo.name.split("_Alb")[0]
     else:
         textureset_name = collection['dirname']
-    for img_name, _filepath in _image_path_cache.items():
+    for img_name, _filepath in CACHE_image_paths.items():
         if img_name.startswith(textureset_name):
             extra_name_part = img_name[len(textureset_name):]
             if not any([extra_name_part.startswith(suf) for suf in TEX_SUFFIXES]):
@@ -799,12 +832,7 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
             guessed_textures = [img for img in guessed_textures if "stone" in img.name.lower()]
         else:
             guessed_textures = [img for img in guessed_textures if ("stone" not in img.name.lower()) and ("_A_" not in img.name)]
-    for prefix in OBJ_PREFIXES:
-        if collection['dirname'].startswith(prefix):
-            shader_name = "BotW: Smooth Shade"
-    if 'tile_textures' in material:
-        shader_name = "BotW: Material Blend"
-    elif any(["Blade_Fx" in img.name for img in all_textures]):
+    if any(["Blade_Fx" in img.name for img in all_textures]):
         if "blade" in lc_matname:
             shader_name = "BotW: Ancient Weapon Blade"
             guessed_textures = [img for img in guessed_textures if "Blade_Fx" in img.name]
@@ -817,20 +845,32 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
     elif any(["clrmak" in img.name.lower() or "clrmsk" in img.name.lower() for img in all_textures]):
         shader_name = "BotW: Generic NPC"
 
-    shader_data = get_shader_data(material)
-    try:
-        if shader_data['shaderassign']['options']['uking_enable_wind_vtx_transform'] == 1:
-            shader_name = "BotW: Fauna"
-            material.displacement_method = 'BOTH'
-    except:
-        pass
+    for prefix in OBJ_PREFIXES:
+        if collection['dirname'].startswith(prefix):
+            shader_name = "BotW: Smooth Shade"
+    if 'tile_textures' in material:
+        shader_name = "BotW: Material Blend"
 
-    if len(obj.data.color_attributes) > 0 and shader_name != "BotW: Material Blend" and len([socket for socket in socket_map.keys() if 'Albedo' in socket]) > 1:
+    wind_enabled = get_shader_property(material, "shaderassign.options.uking_enable_wind_vtx_transform")
+    wind_intensity = get_shader_property(material, "matparam.uking_wind_vtx_transform_intensity.ValueFloat", index=0)
+    is_a_tree = get_shader_property(material, "shaderassign.options.uking_enable_lumberjack") == 1
+    if (
+        wind_enabled == 1 and
+        wind_intensity not in(0.1, None) and   # For some reason 0.1 is the default value, and it's assigned to a lot of things that should not be affected by wind... Is it assigned to anything that SHOULD be affected by wind? I'm not sure.
+        not is_a_tree
+    ):
+        shader_name = "BotW: Fauna"
+        if 'custom_normal' in obj.data.attributes:
+            # Disable custom normals without deleting them.
+            # They tend to make the leaves look a lot worse in Blender.
+            obj.data.attributes['custom_normal'].name = 'custom_normal_bkp'
+        material.displacement_method = 'BOTH'
+    elif len(obj.data.color_attributes) > 0 and shader_name != "BotW: Material Blend" and len([socket for image, socket in socket_map.items() if 'Albedo' in socket]) > 1:
         shader_name = "BotW: Material Blend"
         material['WARNING'] = "Using material blend shader because there is a vertex color and >1 albedos."
 
     def order_texture_list(imgs: list[bpy.types.Image]) -> list[bpy.types.Image]:
-        order = ["Alb", "AO", "Spm", "Nrm", "Emm", "Fx"]
+        order = ["Alb", "Msk", "AO", "Spm", "Msk", "Nrm", "Emm", "Fx"]
         return sorted(imgs,
             key=lambda img: 
             [
@@ -910,18 +950,18 @@ def hookup_texture_nodes(collection, material, shader_node, socket_map) -> bool:
             set_socket_value(shader_node, f"Blend 1 Factor", 1)
 
         if len(shader_socket.links) == 0:
-            if shader_socket.name == 'Alpha' and not is_transparent(material):
+            if shader_socket.name == 'Alpha' and get_shader_property(material, 'isTransparent') != 1:
                 pass
             else:
                 links.new(img_node.outputs['Color'], shader_socket)
         else:
             print_later(f"Shader socket already taken: '{material.name}' -> '{img.name}' ({socket_name})")
 
-        if is_transparent(material) != False:
+        if bool(get_shader_property(material, 'isTransparent')) != False:
             material.surface_render_method = get_alpha_mode(material)
         # Since transparency doesn't (always) get its own texture node, hook up the Alpha of the Albedo.
         alpha_socket = shader_node.inputs.get('Alpha')
-        if socket_name in ('Albedo', 'Fx Texture Distorted') and is_transparent(material) and pixel_image.has_alpha:
+        if socket_name in ('Albedo', 'Fx Texture Distorted') and get_shader_property(material, 'isTransparent')==1 and pixel_image.has_alpha:
             if alpha_socket and len(alpha_socket.links) == 0 and 'Alpha' in img_node.outputs:
                 links.new(img_node.outputs['Alpha'], alpha_socket)
         # But if after those steps we didn't hook up any alpha, don't set it to Blended, since that will cause sorting issues.
@@ -1135,38 +1175,21 @@ def ensure_UV_node(material, img_node, shader_name):
                 set_socket_value(pingpong_node, 'PingPong Y', True)
             links.new(pingpong_node.outputs[0], img_node.inputs[0])
 
-def load_material_data(json_name):
-    # This database was generated by me based on my custom build of 
-    # Switch Toolbox and the material_json scripts found in this repo.
-
-    global _shader_data_cache
-    if not _shader_data_cache:
-        with open(MATERIAL_DATA_ZIP, "rb") as f:
-            zip_data = f.read()
-
-        with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
-            for file_name in z.namelist():
-                with z.open(file_name) as file:
-                    _shader_data_cache[file_name] = json.loads(file.read())
-
-    # Combine the shader data on top of the default material values.
-    # NOTE: I commented this out because the default values are kinda meaningless and I worry adding them here is an unnecessary memory cost.
-    # return {**DEFAULT_MATERIAL, **shader_data}
-
-    return _shader_data_cache.get(json_name, {})
-
 def get_shader_data(material) -> dict:
     """Tried to optimize json loading by caching but it's insignificant."""
     if 'json_name' not in material:
         print_later("No shader data: ", material)
         return {}
-    return load_material_data(material['json_name'])
+
+    cache_ensure_shader_data()
+
+    global CACHE_shader_data
+    return CACHE_shader_data.get(material['json_name'], {})
 
 def get_tex_data(material, img) -> dict:
-    shader_data = get_shader_data(material)
-    if not shader_data:
+    tex_maps = get_shader_property(material, 'TextureMaps')
+    if not tex_maps:
         return {}
-    tex_maps = shader_data['TextureMaps']
     return next((data for name, data in tex_maps.items() if name == Path(img.filepath).stem), {})
 
 def get_alpha_mode(material) -> str:
@@ -1177,23 +1200,16 @@ def get_alpha_mode(material) -> str:
     TODO: I think decals (that have z-fighting issues) might have a shading flag that we could use to apply a displacement material to resolve the z-fighting.
     """
 
-    shader_data = get_shader_data(material)
-    if not shader_data:
-        return 'DITHERED'
-    try:
-        alpha_flag = shader_data['MaterialU']['RenderState']['_flags']
-    except:
-        alpha_flag = 1
+    alpha_flag = get_shader_property(material, 'MaterialU.RenderState._flags') or 1
 
     # These are complete guesses atm. TODO: improve this mapping.
     zelda_blend_modes = {
         1: 'Opaque',        # 13553 cases
         2: 'AlphaMask',     # 3785 cases
         16: 'Custom',       # 108 cases
-        16: 'Translucent',  # 1249 cases
-        19: 'Unknown',      # 165 cases
+        19: 'Translucent',  # 1249 cases
+        None: 'Unknown',    # 165 cases
     }
-    blend_mode = 'Opaque'
     blend_mode = zelda_blend_modes.get(alpha_flag, "AlphaMask")
 
     return 'BLENDED' if blend_mode == 'Translucent' else 'DITHERED'
@@ -1208,16 +1224,9 @@ def texture_uses_first_uvmap(material, img) -> bool or None:
     if not tex_data:
         return True
     tex_idx = tex_data['textureUnit'] - 1
-    shader_data = get_shader_data(material)
-    if not shader_data:
-        return None
-    try:
-        shader_options = shader_data['shaderassign']['options']
-    except:
-        return None
 
-    # NOTE: For TotK, this might have to be `o_texture{tex_idx}_texcoord``, but I never tried.
-    uv_idx = shader_options.get(f'uking_texture{tex_idx}_texcoord')
+    # NOTE: TotK equivalent is apparently `o_texture{tex_idx}_texcoord`.
+    uv_idx = get_shader_property(material, f'shaderassign.options.uking_texture{tex_idx}_texcoord')
     return uv_idx == 0
 
 def hookup_rgb_nodes(material, shader_node):
@@ -1250,30 +1259,41 @@ def hookup_rgb_nodes(material, shader_node):
 
 def get_color_values(material) -> list[Vector]:
     colors = []
-    shader_data = get_shader_data(material)
-    if not shader_data:
+    matparam = get_shader_property(material, 'matparam')
+    if not matparam:
         return colors
-    for name, data in shader_data['matparam'].items():
+    for name, data in matparam.items():
         if name.startswith("const_color"):
             vec = Vector((data['ValueFloat']))
             vec.normalize()
             colors.append(vec)
     return colors
 
-def is_transparent(material) -> bool or None:
+def get_shader_property(material, prop_path, index=None):
     shader_data = get_shader_data(material)
     if not shader_data:
         return None
-    return shader_data.get('isTransparent', False)
+    prop = shader_data
 
-def is_doublesided(material):
-    shader_data = get_shader_data(material)
-    if not shader_data:
-        return None
-    try: 
-        return shader_data['shaderassign']['options']['uking_enable_backface_modify'] == 1
-    except:
-        return True
+    for part in prop_path.split("."):
+        if isinstance(prop, dict):
+            prop = prop.get(part)
+        if not prop:
+            break
+
+    if not prop:
+        # TODO: This should technically support wildcards.
+        prop = CACHE_mat_defaults.get(prop_path, None)
+    if not prop:
+        return
+
+    if type(prop) == list:
+        if index == None and len(prop)==1:
+            index = 0
+        if index != None:
+            return prop[index]
+
+    return prop
 
 def ensure_loaded_img(img_name):
     if not img_name.endswith(TEXTURE_EXTENSION):
@@ -1283,20 +1303,32 @@ def ensure_loaded_img(img_name):
     if not real_img_path:
         return
 
-    existing_img = bpy.data.images.get(img_name)
-    if existing_img:
-        existing_img.filepath = real_img_path
+    img = bpy.data.images.get(img_name)
+    if img:
+        img.filepath = real_img_path
     else:
-        existing_img = bpy.data.images.load(real_img_path, check_existing=True)
-    
-    if existing_img.name != img_name:
+        img = bpy.data.images.load(real_img_path, check_existing=True)
+
+    if img.name in CACHE_tex_info:
+        tex_info = CACHE_tex_info[img.name]
+        img['is_single_color'] = tex_info['is_single_color']
+        img['has_red'] = tex_info['has_red']
+        img['has_green'] = tex_info['has_green']
+        img['has_blue'] = tex_info['has_blue']
+        img['has_alpha'] = tex_info['has_alpha']
+        img['average_color'] = tex_info['average_color']
+        img['all_channels_match'] = tex_info['all_channels_match']
+    else:
+        print_later(f"Couldn't find in texture info cache: {img.name}")
+
+    if img.name != img_name:
         try:
-            existing_img.name = img_name
+            img.name = img_name
         except AttributeError:
             # Sometimes it's read-only, I think it's when it's a linked texture or something?
-            print_later(f"Couldn't rename texture: {existing_img.name}")
+            print_later(f"Couldn't rename texture: {img.name}")
 
-    return existing_img
+    return img
 
 def set_shader_socket_values(collection, obj, material, shader_node, spm_has_green):
     lc_matname = material.name.lower()
@@ -1347,11 +1379,16 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         set_socket_value(shader_node, 'Metal', True)
 
     if shader_node.node_tree.name == 'BotW: Material Blend':
-        set_socket_value(shader_node, "Transparent Edges", is_transparent(material))
+        set_socket_value(shader_node, "Transparent Edges", get_shader_property(material, 'isTransparent') or False)
         ensure_edge_attribute(bpy.context, obj)
 
     if shader_node.node_tree.name == 'BotW: Fauna':
-        set_socket_value(shader_node, "Double Sided", is_doublesided(material))
+        # Interpreting `uking_enable_backface_modify` as backface culling seems to do more harm than good.
+        # On the leaves it's no longer necessary since I use Displacement to pull apart z-fighting planes,
+        # and this value is set on branch materials which are obviously double-sided in-game.
+        # material.use_backface_culling = get_shader_property(material, 'shaderassign.options.uking_enable_backface_modify') == 1
+        wind_intensity = get_shader_property(material, "matparam.uking_wind_vtx_transform_intensity.ValueFloat")
+        set_socket_value(shader_node, 'Wind Intensity', wind_intensity)
 
     for socket_name, value in (('Rubber', rubber), ('Metal', metal), ('Hair', hair)):
         set_socket_value(shader_node, socket_name, value)
@@ -1454,7 +1491,8 @@ def get_average_albedo_color(material) -> tuple or None:
     if 'average_color' in albedo_node.image:
         return albedo_node.image['average_color'].to_list()
     pixel_image = PixelImage.from_blender_image(albedo_node.image)
-    albedo_node.image['average_color'] = pixel_image.average_color
+    average_color = pixel_image.average_color
+    albedo_node.image['average_color'] = average_color
     return pixel_image.average_color
 
 def get_albedo_socket(material):

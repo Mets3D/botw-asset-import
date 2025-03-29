@@ -10,7 +10,7 @@ class PixelImage:
     cache = {}
 
     @classmethod
-    def from_blender_image(cls, bpy_img: bpy.types.Image, ignore_cache=False):
+    def from_blender_image(cls, bpy_img: bpy.types.Image, ignore_cache=False, cached_data={}):
         if bpy_img.name in cls.cache and not ignore_cache:
             return cls.cache[bpy_img.name]
 
@@ -19,6 +19,15 @@ class PixelImage:
         instance.height = bpy_img.size[1]
         instance.bpy_img = bpy_img
         cls.cache[bpy_img.name] = instance
+
+        if 'all_channels_match' in bpy_img:
+            instance._is_single_color = bpy_img['is_single_color']
+            instance._has_red = bpy_img['has_red']
+            instance._has_green = bpy_img['has_green']
+            instance._has_blue = bpy_img['has_blue']
+            instance._has_alpha = bpy_img['has_alpha']
+            instance._average_color = bpy_img['average_color']
+            instance._all_channels_match = bpy_img['all_channels_match']
 
         return instance
 
@@ -162,6 +171,7 @@ class PixelImage:
     def pixels_rgba(self, value):
         # If we change the pixels, reset all the cached values.
         self._is_single_color = None
+        self._has_red = None
         self._has_green = None
         self._has_blue = None
         self._has_alpha = None

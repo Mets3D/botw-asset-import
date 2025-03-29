@@ -10,13 +10,14 @@ def write_more_readable_json_data(models_dir, output_dir):
 
     # Recursively find all .json files
     json_files = list(root_dir.rglob("*.json"))
+    json_files = [f for f in json_files if 'Deferred' not in f.as_posix() and 'SceneMaterial_MasterMaterial' not in f.as_posix()]
 
     # Loop through each JSON file
     for i, file in enumerate(json_files):
         target_file = os.path.join(output_dir, os.path.basename(file))
+        print(f"{i+1}/{len(json_files)} {file}")
         if os.path.exists(target_file):
             continue
-        print(i, len(json_files), file)
         # if i > 0:  # Limit for testing (can remove later)
         #    break
         try:

@@ -120,7 +120,18 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     bl_options = {'REGISTER', 'UNDO'}
 
     directory: bpy.props.StringProperty(subtype='FILE_PATH', options={'SKIP_SAVE', 'HIDDEN'})
+    rename_known: bpy.props.BoolProperty(name="Rename Known Assets", description="If an object's name is found in the asset name map, rename it to that", default=True)
+    rename_unknown: bpy.props.BoolProperty(name="Rename Unknown Assets", description="If an object's name isn't found in the asset name map, rename it to title case and remove some prefixes", default=True)
+    create_parent_collections: bpy.props.BoolProperty(name="Create Parent Collections", description="When a directory has more than 1 file, create a parent collection that represents that directory", default=True)
+
     force_update_caches: bpy.props.BoolProperty(default=False)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, 'rename_known')
+        if self.rename_known:
+            layout.prop(self, 'rename_unknown')
+        layout.prop(self, 'create_parent_collections')
 
     def execute(self, context):
         global PRINT_LATER
@@ -146,13 +157,15 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             if dirname.endswith("_Far"):
                 # These are LOD meshes, we don't want those.
                 continue
-            if len(dae_files) > 1:
+            if len(dae_files) > 1 and self.create_parent_collections:
                 parent_coll_name = root.split(os.sep)[-1]
                 if root_dir_name != parent_coll_name:
                     parent_coll_name = asset_names.get(parent_coll_name, parent_coll_name)
                     parent_coll = ensure_collection(context, parent_coll_name)
             for dae_name in dae_files:
-                asset_name = derive_asset_name(dae_name, dirname, len(dae_files)==1)
+                asset_name = dae_name.replace(".dae", "")
+                if self.rename_known:
+                    asset_name = derive_asset_name(dae_name, dirname, len(dae_files)==1, self.rename_unknown)
 
                 if 'Animation' in asset_name:
                     continue
@@ -175,7 +188,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
 
         return {'FINISHED'}
 
-def derive_asset_name(dae_filename: str, dirname: str, is_single_file: bool) -> str:
+def derive_asset_name(dae_filename: str, dirname: str, is_single_file: bool, remove_prefixes=True) -> str:
     without_ext = dae_filename.replace(".dae", "")
     asset_name = asset_names.get(without_ext, without_ext)
 
@@ -200,6 +213,9 @@ def derive_asset_name(dae_filename: str, dirname: str, is_single_file: bool) -> 
     if asset_name == without_ext and "Enemy" in asset_name:
         asset_name = asset_names.get(asset_name.replace("Enemy_", ""), asset_name)
 
+    if not remove_prefixes:
+        return asset_name
+
     # Most "Obj_" prefix meshes won't be in the dictionary, since they don't have any in-game strings 
     # that are exposed to the player. (non-cel shaded environment meshes)
     # So to avoid having to add all of these to the dictionary, just do some string operations.
@@ -207,8 +223,8 @@ def derive_asset_name(dae_filename: str, dirname: str, is_single_file: bool) -> 
         if asset_name.startswith(prefix):
             asset_name = asset_name[len(prefix):]
 
-    asset_name = camel_to_spaces(asset_name.replace("_", " "))
-    asset_name = asset_name.replace("  ", " ").replace("D L C", "DLC")
+    asset_name = asset_name.replace("D L C", "DLC")
+    asset_name = camel_to_spaces(asset_name.replace("_", " ")).replace("  ", " ")
 
     return asset_name
 
@@ -324,8 +340,8 @@ def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll
             with context.temp_override(**override):
                 bpy.ops.ed.lib_id_load_custom_preview(filepath=icon_filepath)
 
-    dae_textures = get_textures_used_by_dae(full_path)
-    for obj in context.selected_objects:
+    ret_objs = []
+    for obj in objs:
         if obj.type == 'ARMATURE':
             if obj.animation_data and obj.animation_data.action:
                 obj.animation_data.action = None
@@ -362,7 +378,6 @@ def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll
                     obj.modifiers.remove(mod)
 
             for mat in obj.data.materials:
-                # mat['dae_textures'] = dae_textures.get(mat['import_name'], [])
                 json_mat_name = collection['file_name'] + "_" + mat['import_name'] + ".json"
                 mat['json_name'] = json_mat_name
                 mat_data = get_shader_data(mat)
@@ -379,8 +394,9 @@ def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll
                 obj.hide_viewport, obj.hide_render = True, True
 
         obj.data.name = obj.name
+        ret_objs.append(obj)
 
-    return context.selected_objects[:]
+    return ret_objs
 
 def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, asset_name):
     """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
@@ -399,7 +415,6 @@ def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, asset_name):
         return
 
     ret_objs = dae_objs[:]
-
 
     assert len(fbx_armatures) == len(dae_armatures) == 1
 
@@ -425,7 +440,6 @@ def import_dae(context, filepath, discard_types=('EMPTY')):
     return import_dae_or_fbx(context, is_dae=True, filepath=filepath, discard_types=discard_types)
 
 def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = ('EMPTY')):
-
     # Both of these functions take a "filepath" property, 
     # and both load the contents to the active collection and select all objects.
     import_func = bpy.ops.wm.collada_import if is_dae else bpy.ops.import_scene.fbx

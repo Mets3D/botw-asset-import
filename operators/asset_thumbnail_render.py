@@ -18,7 +18,18 @@ class ASSET_OT_thumbnail_from_viewport(bpy.types.Operator):
             return bool(context.id)
 
     def execute(self, context):
-        return asset_thumbnail_from_viewport(context, context.id, self)
+        org_res = context.scene.render.resolution_x, context.scene.render.resolution_y
+        org_transparent = context.scene.render.film_transparent
+        org_format = context.scene.render.image_settings.file_format
+        org_png_format = context.scene.render.image_settings.color_mode
+        org_png_depth = context.scene.render.image_settings.color_depth
+        ret = asset_thumbnail_from_viewport(context, context.id, self)
+        context.scene.render.film_transparent = org_transparent
+        context.scene.render.resolution_x, context.scene.render.resolution_y = org_res
+        context.scene.render.image_settings.file_format = org_format
+        context.scene.render.image_settings.color_mode = org_png_format
+        context.scene.render.image_settings.color_depth = org_png_depth
+        return ret
 
 class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
     """Create an asset preview from a viewport render for all selected assets."""
@@ -45,6 +56,7 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
             self.index += 1
             
             if self.index > len(self.ids)-1:
+                self.reset_output_props(context)
                 self.pb.destroy()
                 Timer.summarize()
                 return {'FINISHED'}
@@ -52,6 +64,18 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
                 return {'PASS_THROUGH'}
 
     def invoke(self, context, event):
+        self.org_res = context.scene.render.resolution_x, context.scene.render.resolution_y
+        self.org_transparent = context.scene.render.film_transparent
+        self.org_format = context.scene.render.image_settings.file_format
+        self.org_png_format = context.scene.render.image_settings.color_mode
+        self.org_png_depth = context.scene.render.image_settings.color_depth
+        
+        context.scene.render.film_transparent = True
+        context.scene.render.resolution_x, context.scene.render.resolution_y = 512, 512
+        context.scene.render.image_settings.file_format = 'PNG'
+        context.scene.render.image_settings.color_mode = 'RGBA'
+        context.scene.render.image_settings.color_depth = '8'
+
         if not self.use_progress_bar:
             return self.execute(context)
         self.pb = ProgressBar(len(context.selected_ids), menu=bpy.types.ASSETBROWSER_MT_editor_menus)
@@ -69,6 +93,7 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
             if result == {'CANCELLED'}:
                 self.report({'ERROR'}, "Failed to generate preview for " + id.name)
 
+        self.reset_output_props(context)
         return {'FINISHED'}
 
     def render_thumbnail(self, context, id):
@@ -86,6 +111,13 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
 
         with Timer("Thumnail render"):
             asset_thumbnail_from_viewport(context, id)
+
+    def reset_output_props(self, context):
+        context.scene.render.film_transparent = self.org_transparent
+        context.scene.render.resolution_x, context.scene.render.resolution_y = self.org_res
+        context.scene.render.image_settings.file_format = self.org_format
+        context.scene.render.image_settings.color_mode = self.org_png_format
+        context.scene.render.image_settings.color_depth = self.org_png_depth
 
 class ASSET_OT_crop_asset_thumbnails(bpy.types.Operator):
     """Create an asset preview from a viewport render for all selected assets."""
@@ -121,7 +153,7 @@ def crop_asset_preview(id) -> bool:
     id.preview.image_pixels_float = pixel_img.pixels
     return success
 
-def asset_thumbnail_from_viewport(context, id, operator=None):
+def asset_thumbnail_from_viewport(context, id, operator=None, change_output_settings=False):
     overlays_bkp = True
     for area in context.screen.areas:
         if area.type == 'VIEW_3D':
@@ -129,10 +161,15 @@ def asset_thumbnail_from_viewport(context, id, operator=None):
             area.spaces.active.overlay.show_overlays = False
             break
     with Timer("OpenGL Render"):
-        org_res = context.scene.render.resolution_x, context.scene.render.resolution_y
-        context.scene.render.resolution_x, context.scene.render.resolution_y = 512, 512
+
+        if change_output_settings:
+            context.scene.render.film_transparent = True
+            context.scene.render.resolution_x, context.scene.render.resolution_y = 512, 512
+            context.scene.render.image_settings.file_format = 'PNG'
+            context.scene.render.image_settings.color_mode = 'RGBA'
+            context.scene.render.image_settings.color_depth = '8'
+
         bpy.ops.render.opengl()
-        context.scene.render.resolution_x, context.scene.render.resolution_y = org_res
     area.spaces.active.overlay.show_overlays = overlays_bkp
     render_result = next(image for image in bpy.data.images if image.type == "RENDER_RESULT")
     if not render_result:

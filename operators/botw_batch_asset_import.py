@@ -2,6 +2,8 @@ import bpy, os, re, json, zipfile, io
 from collections import OrderedDict
 from math import pi
 from pathlib import Path
+import pickle
+from multiprocessing import shared_memory
 
 from mathutils import Vector, Color, Euler
 from bpy.types import Operator
@@ -42,17 +44,37 @@ CACHE_tex_info = {}
 CACHE_shader_data = {}
 CACHE_image_paths = {}
 
-def ensure_caches(force=False):
+
+def read_shared_dict(shm_name="my_shared_dict"):
+    """Reads a dictionary from shared memory and deserializes it."""
+    shm = shared_memory.SharedMemory(name=shm_name)  # Attach to shared memory
+    serialized_data = bytes(shm.buf[:])  # Read bytes from shared memory
+    data = pickle.loads(serialized_data)  # Deserialize back to dictionary
+
+    return data
+
+def ensure_caches(force=False, shared_mem_name=""):
     """Load a bunch of useful data into memory.
     Only needs to be done once per Blender session.
     Done when the the import operator is first used.
     """
     global CACHE_mat_defaults   # 18 kb
+    global CACHE_tex_info       # 4.5 mb
+    global CACHE_image_paths    # a few kb
+    global CACHE_shader_data    # 100 mb
+
+    if shared_mem_name:
+        data = read_shared_dict(shared_mem_name)
+        CACHE_mat_defaults = data['material_defaults']
+        CACHE_tex_info = data['tex_info']
+        CACHE_image_paths = data['image_paths']
+        CACHE_shader_data = data['shader_data']
+        return {'material_defaults':CACHE_mat_defaults, 'tex_info': CACHE_tex_info, 'image_paths': CACHE_image_paths, 'shader_data': CACHE_shader_data}
+
     if not CACHE_mat_defaults or force:
         with open(MATERIAL_DEFAULTS_JSON, "r", encoding="utf-8") as f:
             CACHE_mat_defaults = json.load(f)
 
-    global CACHE_tex_info   # 4.5 mb
     if not CACHE_tex_info or force:
         with open(TEXTURE_INFO_JSON, "r", encoding="utf-8") as f:
             CACHE_tex_info = json.load(f)
@@ -61,9 +83,11 @@ def ensure_caches(force=False):
     if not CACHE_image_paths or force:
         cache_ensure_image_paths()
 
-    global CACHE_shader_data
     if not CACHE_shader_data or force:
-        cache_ensure_shader_data()  # 100 mb
+        cache_ensure_shader_data()
+
+    return {'material_defaults':CACHE_mat_defaults, 'tex_info': CACHE_tex_info, 'image_paths': CACHE_image_paths, 'shader_data': CACHE_shader_data}
+
 
 def cache_ensure_image_paths() -> dict[str, str]:
     """Create a mapping from image names to full filepaths in the Game Models folder."""

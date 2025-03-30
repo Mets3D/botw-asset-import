@@ -2,9 +2,12 @@ import bpy, os, glob, sys, time, subprocess, shutil, io, zipfile, json
 from bpy.props import BoolProperty, StringProperty, IntProperty, EnumProperty
 from mathutils import Matrix, Vector, Euler
 from math import pi, radians
+import pickle
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from multiprocessing import shared_memory
 
+from ..operators.botw_batch_asset_import import ensure_caches
 from ..prefs import get_addon_prefs
 from ..utils.collections import ensure_collection
 
@@ -20,6 +23,7 @@ DEFAULT_BLEND = os.path.join(THIS_FOLDER, "asset_blank_file.blend")
 
 BLENDER = os.path.abspath(sys.argv[0])
 
+ALL_MAP_SECTIONS = [f"{letter}-{number}" for letter in "ABCDEFGHIJ" for number in range(1, 9)]
 
 class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
     """Build asset cache one .blend per asset for importing bmubin's map data"""
@@ -31,7 +35,7 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         prefs = get_addon_prefs(context)
         model_dir = prefs.game_models_folder
         ignore_words = [word.strip() for word in self.ignore.split(",")]
-        dae_map = get_dae_files_to_process(model_dir, self.target_dir, self.overwrite, ignore_words, self.map_section)
+        dae_map = get_dae_files_to_process(model_dir, self.target_dir, self.overwrite, ignore_words, self.asset_group)
         self.dae_count = len(list(dae_map.values()))
         self.dae_map = json.dumps(dae_map)
 
@@ -50,7 +54,7 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
 
     ignore: StringProperty(
         name="Ignore", 
-        default="_Far, _Animation, DgnMrgPrt, Armor_, Animal_, Enemy_, _Fxmdl", 
+        default="_Far, _Animation, DgnMrgPrt, UMii_, Armor_, _Fxmdl, Animal_, Enemy_", 
         description="If a .dae file has any of these words, do not import it", 
         update=count_dae
     )
@@ -67,12 +71,13 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         default=BLEND_DIR, 
         update=count_dae
     )
-    map_section: EnumProperty(
-        name="Map Section", 
-        description="Focus only on the assets of a given map chunk. A1 is the top left, A8 is the bottom left, J8 is the bottom right",
-        items=[("ALL", "All", "All assets used in the map")] + [
-            (f"{letter}-{number}", f"{letter}-{number}", f"{letter}-{number}") for letter in "ABCDEFGHIJ" for number in range(1, 9)
-        ],
+    asset_group: EnumProperty(
+        name="Asset Group", 
+        description="Which assets of the game to import. Either the whole game, only those found in the map, or only those found in a chunk of the map",
+        items=[
+            ("GAME", "Whole Game", "All assets in the game"), 
+            ("MAP_ALL", "Whole Map", "All assets used in the map")
+        ] + [(s, s, "Map Section "+s) for s in ALL_MAP_SECTIONS],
         default="B-7",
         update=count_dae,
     )
@@ -102,7 +107,7 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         layout.prop(self, 'ignore')
         layout.prop(self, 'overwrite')
         layout.prop(self, 'target_dir')
-        layout.prop(self, 'map_section')
+        layout.prop(self, 'asset_group')
 
         layout.label(text=f"{self.dae_count} asset .blend files will be generated.")
 
@@ -127,9 +132,7 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
     map_section: EnumProperty(
         name="Map Section", 
         description="Section of the map to import",
-        items=[
-            (f"{letter}-{number}", f"{letter}-{number}", f"{letter}-{number}") for letter in "ABCDEFGHIJ" for number in range(1, 9)
-        ],
+        items=[(s, s, "Map Section "+s) for s in ALL_MAP_SECTIONS],
         default="B-7",
     )
 
@@ -141,7 +144,7 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
         layout.use_property_split=True
         layout.use_property_decorate=False
         layout.prop(self, 'blend_dir')
-        layout.prop(self, 'map_section')
+        layout.prop(self, 'asset_group')
 
     def execute(self, context):
         map_data = load_instance_database()[self.map_section+"_instance_cache.json"]
@@ -225,7 +228,7 @@ def ensure_asset_collection(blend_dir, asset_name) -> bpy.types.Collection or No
 def load_instance_database() -> dict:
     # This cache and database was taken from the source code of bmubin.
     # No idea how the bmubin dev generated this, but likely the same way as projects like ice-spear,
-    # by bein much smarter than me and reading .sbfres binary data.
+    # by being much smarter than me and reading .sbfres binary data.
     # Many thanks!
     instance_database = {}
 
@@ -240,12 +243,20 @@ def load_instance_database() -> dict:
 
     return instance_database
 
+all_dae_paths_cached = []
+def get_all_dae_paths(dae_dir):
+    global all_dae_paths_cached
+    if not all_dae_paths_cached:
+        all_dae_paths_cached = glob.glob(os.path.join(dae_dir, "**", "*.dae"), recursive=True)
 
-def get_dae_files_to_process(dae_dir, blend_dir, overwrite=False, ignore=[], map_section=None):
-    dae_paths = glob.glob(os.path.join(dae_dir, "**", "*.dae"), recursive=True)
+    return all_dae_paths_cached
+
+def get_dae_files_to_process(dae_dir, blend_dir, overwrite=False, ignore=[], asset_group=None):
+    dae_paths = get_all_dae_paths(dae_dir)
 
     # Filter ignored words.
-    dae_paths = [f for f in dae_paths if not any([word in f for word in ignore])]
+    if ignore != ['']:
+        dae_paths = [f for f in dae_paths if not any([word in f for word in ignore])]
 
     # Map the .dae paths to the corresponding .blend file path that should be created.
     dae_to_blend_map = {dae_path: os.path.join(blend_dir, os.path.splitext(os.path.basename(dae_path))[0] + ".blend") for dae_path in dae_paths}
@@ -254,60 +265,98 @@ def get_dae_files_to_process(dae_dir, blend_dir, overwrite=False, ignore=[], map
         # Filter out .blend files that already exist.
         dae_to_blend_map = {dae:blend for dae, blend in dae_to_blend_map.items() if not os.path.isfile(blend)}
 
-    if map_section:
+    if asset_group != 'GAME':
+        # Filter out assets that aren't used by the chosen asset_group (which is a map section or whole map)
         map_data = load_instance_database()
+        assets_of_map = []
         for key, value in map_data.items():
-            if map_section != 'ALL' and key != map_section+"_instance_cache.json":
+            if asset_group != 'MAP_ALL' and key != asset_group+"_instance_cache.json":
                 continue
-            if map_section == 'ALL':
-                continue
-            dynamic_assets = list(value[map_section+"_Dynamic"]["models"].keys())
-            static_assets = list(value[map_section+"_Static"]["models"].keys())
-            all_assets = dynamic_assets + static_assets
-            dae_to_blend_map = {dae:blend for dae, blend in dae_to_blend_map.items() if os.path.splitext(os.path.basename(dae))[0] in all_assets}
+            dynamic_assets = list(value[key[:3]+"_Dynamic"]["models"].keys())
+            static_assets = list(value[key[:3]+"_Static"]["models"].keys())
+            assets_of_map += dynamic_assets
+            assets_of_map += static_assets
+    
+        dae_to_blend_map = {dae:blend for dae, blend in dae_to_blend_map.items() if os.path.splitext(os.path.basename(dae))[0] in assets_of_map}
 
     return dae_to_blend_map
+
+def create_shared_memory(data):
+    """Serializes a dictionary and writes it to shared memory."""
+    serialized_data = pickle.dumps(data)  # Convert dict to bytes
+    try:
+        shm = shared_memory.SharedMemory(create=True, size=len(serialized_data), name="BOTW_ASSET_CACHE")
+    except FileExistsError:
+        shm = shared_memory.SharedMemory(name="BOTW_ASSET_CACHE")
+
+    # Write to shared memory
+    shm.buf[:len(serialized_data)] = serialized_data
+
+    print(f"Shared memory '{shm.name}' ensured.")
+
+    return shm
 
 
 def build_asset_library(dae_to_blend_map: dict[str, str], quiet=True, workers=8, timeout=180):
     start_time = time.time()
     print("Building asset library")
+    caches = ensure_caches()
+    # NOTE: EVEN THOUGH THIS VARIABLE IS NEVER USED, IT MUST BE ASSIGNED!!!
+    # OTHERWISE THE GARBAGE COLLECTOR WILL NUKE THE SHARED MEMORY FROM ORBIT!!!
+    # IT TOOK ME HOURS TO TROUBLESHOOT THIS AND I WANT TO KILL MYSELF
+    shared_memory = create_shared_memory(caches)
 
     # Limit to just 5 items for testing.
     # dae_to_blend_map = dict(list(dae_to_blend_map.items())[:5])
 
-    print("dae blend map:")
-    print(dae_to_blend_map)
-
     target_dir = os.path.dirname(list(dae_to_blend_map.values())[0])
-    shutil.copy(RESOURCE_BLEND, os.path.join(target_dir, os.path.basename(RESOURCE_BLEND)))
+    try:
+        shutil.copy(RESOURCE_BLEND, os.path.join(target_dir, os.path.basename(RESOURCE_BLEND)))
+    except shutil.SameFileError:
+        # This is happening because I symlinked resources.blend.
+        pass
 
     executor = ThreadPoolExecutor(max_workers=workers)
     file_pairs = list(dae_to_blend_map.items())
-    futures = [executor.submit(build_asset, dae_file, blend_file, quiet, True, timeout) for dae_file, blend_file in file_pairs]
+    start_times = {}
+    futures = []
+
+    for dae_file, blend_file in file_pairs:
+        start_time = time.time()  # Record start time
+        future = executor.submit(build_asset, dae_file, blend_file, quiet, True, timeout)
+        start_times[future] = start_time  # Track when each future started
+        futures.append(future)
+
     num_completed = 0
     timedout_assets = []
 
     total = len(list(dae_to_blend_map.keys()))
 
     for i, future in enumerate(as_completed(futures)):
-        # retrieve the result
-        res = future.result()
         dae_file = file_pairs[i][1]
+
+        res = future.result()
+
         if res == 'complete':
+            start_time = start_times[future]
+            end_time = time.time()
+            duration = end_time - start_time
+            print(f"File ({i}/{total}) {dae_file} completed in {duration:.2f} seconds", flush=True)
             num_completed += 1
-            print(f"Built asset: ({i}/{total}) {dae_file}", flush=True)
         else:
             timedout_assets.append(dae_file)
 
     print(f'\nAssets completed: {num_completed}')
-    print(f'nAssets timed out: {len(timedout_assets)}')
+    print(f'Assets timed out: {len(timedout_assets)}')
     for timedout_asset in timedout_assets:
         print(timedout_asset)
     print(f'\nCompleted in {time.time() - start_time:.2f} seconds.\n')
 
+    # free up memory
+    shared_memory.close()
+    shared_memory.unlink()
 
-def build_asset(dae_path, blend_path, quiet=True, background=True, timeout_s=180):
+def build_asset(dae_path, blend_path, quiet=True, background=True, timeout_s=180, shared_mem=("", 0)):
     bg = None
     if background:
         bg = '--background'
@@ -321,7 +370,6 @@ def build_asset(dae_path, blend_path, quiet=True, background=True, timeout_s=180
         "--python",
         os.path.join(THIS_FOLDER, "build_asset.py"),
         # "--factory-startup", # NOTE: We need to import this add-on in the blender instance, so we can't use factory start-up. That said, if you have a lot of add-ons enabled, it will slow down the process.
-        ADDON_DIR,
         dae_path,
         blend_path,
     ]

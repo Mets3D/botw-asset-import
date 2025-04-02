@@ -27,14 +27,9 @@ class BotWImportPreferences(AddonPreferences):
         description="Try to make collection names more human-readable using name tables, prefix stripping, and other string operations. Useful when trying to create an asset library, but may be undesired if you want to do further scripting work on the assets. Note that regardless of this option, the original collection name is always stored in a 'file_name' custom property",
         default=True
     )
-    rename_objects: BoolProperty(
+    rename_obj_mat: BoolProperty(
         name="Rename Objects",
-        description="Try to make object names more human-readable by discarding default object names of 3D modeling softwares (pCube, pCylinder, etc)",
-        default=True
-    )
-    rename_materials: BoolProperty(
-        name="Rename Materials",
-        description="Try to make material names more human-readable by removing 'Mt_' prefix and prepending the asset name to it",
+        description="Make object/material names more human-readable by discarding default object names of 3D modeling softwares (pCube, pCylinder, etc), and the _Mt_ prefix",
         default=True
     )
 
@@ -52,8 +47,7 @@ class BotWImportPreferences(AddonPreferences):
         row.alignment = 'LEFT'
         row.label(text="Rename:")
         row.prop(self, 'rename_collections', text="", icon='OUTLINER_COLLECTION')
-        row.prop(self, 'rename_objects', text="", icon='OBJECT_DATAMODE')
-        row.prop(self, 'rename_materials', text="", icon='MATERIAL_DATA')
+        row.prop(self, 'rename_obj_mat', text="", icon='OBJECT_DATAMODE')
 
 def get_addon_prefs(context=None):
     if not context:

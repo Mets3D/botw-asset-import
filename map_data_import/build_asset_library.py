@@ -1,7 +1,5 @@
-import bpy, os, glob, sys, time, subprocess, shutil, io, zipfile, json
+import bpy, os, glob, sys, time, subprocess, shutil, json, io, zipfile
 from bpy.props import BoolProperty, StringProperty, IntProperty, EnumProperty
-from mathutils import Matrix, Vector, Euler
-from math import pi, radians
 import pickle
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -9,15 +7,14 @@ from multiprocessing import shared_memory
 
 from ..operators.botw_batch_asset_import import ensure_caches
 from ..prefs import get_addon_prefs
-from ..utils.collections import ensure_collection
 
-# TODO: Move these to the preferences or derive from existing preferences
+# TODO: Move this to the preferences or derive from existing preferences
 BLEND_DIR = "D:\\BotW Assets\\bmubin asset library\\assets"
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 ADDON_DIR = os.sep.join(THIS_FOLDER.split(os.sep)[:-1])
-INSTANCE_CACHE_ZIP = os.path.join(ADDON_DIR, "databases", "world_instance_cache.zip")
 RESOURCE_BLEND = os.path.join(ADDON_DIR, "resources.blend")
+INSTANCE_CACHE_ZIP = os.path.join(ADDON_DIR, "databases", "world_instance_cache.zip")
 
 DEFAULT_BLEND = os.path.join(THIS_FOLDER, "asset_blank_file.blend")
 
@@ -54,7 +51,7 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
 
     ignore: StringProperty(
         name="Ignore", 
-        default="_Far, _Animation, DgnMrgPrt, UMii_, Armor_, _Fxmdl, Animal_, Enemy_", 
+        default="_Far, _Animation, DgnMrgPrt, UMii_, _Fxmdl",
         description="If a .dae file has any of these words, do not import it", 
         update=count_dae
     )
@@ -102,146 +99,22 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         row.prop(prefs, 'game_models_folder', text="Models Folder (Preferences)")
         layout.separator()
 
-        layout.prop(self, 'quiet')
         layout.prop(self, 'blender_instances')
-        layout.prop(self, 'ignore')
-        layout.prop(self, 'overwrite')
-        layout.prop(self, 'target_dir')
-        layout.prop(self, 'asset_group')
+        layout.prop(self, 'quiet')
+        layout.separator()
 
+        layout.prop(self, 'target_dir')
+        layout.prop(self, 'overwrite')
+        layout.separator()
+
+        layout.prop(self, 'asset_group')
+        layout.prop(self, 'ignore')
         layout.label(text=f"{self.dae_count} asset .blend files will be generated.")
 
     def execute(self, context):
         dae_to_blend_map = json.loads(self.dae_map)
         build_asset_library(dae_to_blend_map, self.quiet, self.blender_instances)
         return {'FINISHED'}
-
-
-class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
-    """Import one chunk of the overworld"""
-    bl_idname = "object.botw_import_map_section"
-    bl_label = "BotW: Import Map Section"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    blend_dir: StringProperty(
-        name="Asset Folder", 
-        subtype='DIR_PATH', 
-        description="Folder where the .blend files containing the map's assets can be found. Missing assets will be printed to the system console.", 
-        default=BLEND_DIR, 
-    )
-    map_section: EnumProperty(
-        name="Map Section", 
-        description="Section of the map to import",
-        items=[(s, s, "Map Section "+s) for s in ALL_MAP_SECTIONS],
-        default="B-7",
-    )
-
-    def invoke(self, context, _event):
-        return context.window_manager.invoke_props_dialog(self, width=400)
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split=True
-        layout.use_property_decorate=False
-        layout.prop(self, 'blend_dir')
-        layout.prop(self, 'asset_group')
-
-    def execute(self, context):
-        map_data = load_instance_database()[self.map_section+"_instance_cache.json"]
-
-        dynamic_assets = map_data[self.map_section+"_Dynamic"]["models"]
-        static_assets = map_data[self.map_section+"_Static"]["models"]
-
-        coll_root = ensure_collection(context, self.map_section, context.scene.collection)
-        coll_root_temp = ensure_collection(context, self.map_section+"_temp", context.scene.collection)
-        for is_dynamic, assets in zip((True, False), (dynamic_assets, static_assets)):
-            for asset_name, data in assets.items():
-                coll_linked_asset = ensure_asset_collection(self.blend_dir, asset_name)
-                if not coll_linked_asset:
-                    # NOTE: Could make an argument for creating these empties even if the asset is missing. 
-                    # That way, a botcher import can be resumed later instead of starting from scratch. 
-                    # But I think this will be quick anyways.
-                    print(f"Missing asset file: {asset_name}")
-                    coll_missing = ensure_collection(context, self.map_section + " Missing Assets", coll_root)
-                    coll_asset = ensure_collection(context, asset_name, coll_missing)
-                else:
-                    coll_asset = ensure_collection(context, asset_name, coll_root_temp)
-                for transforms in data['positions']:
-                    loc = transforms['location']
-                    rot = transforms['rotate']
-                    scale = transforms['scale']
-                    empty = bpy.data.objects.new(name=asset_name, object_data=None)
-
-                    # this is a bit complicated, but it works
-                    # useful link for explaining order of matrix operations
-                    # https://blender.stackexchange.com/questions/44760/rotate-objects-around-their-origin-along-a-global-axis-scripted-without-bpy-op
-                    r_m0 = Matrix.Rotation(radians(-90), 4, 'X')
-                    t_m = Matrix.Translation(loc)
-                    r_m1 = Matrix.Rotation(radians(90), 4, 'X')
-                    r_m2 = Euler(rot).to_matrix().to_4x4()
-                    empty.matrix_world = r_m1 @ t_m @ r_m2 @ r_m0
-                    empty.scale = scale
-                    empty['is_dynamic'] = is_dynamic
-                    empty.empty_display_size = 0.01
-                    empty.instance_type = 'COLLECTION'
-                    empty.instance_collection = coll_linked_asset
-                    coll_asset.objects.link(empty)
-
-        # Sort the asset collections alphabetically.
-        for coll in sorted(coll_root_temp.children, key=lambda c: c.name):
-            coll_root.children.link(coll)
-            coll_root_temp.children.unlink(coll)
-        bpy.data.collections.remove(coll_root_temp)
-
-        return {'FINISHED'}
-
-
-def ensure_asset_collection(blend_dir, asset_name) -> bpy.types.Collection or None:
-    """Link asset .blend to the file, without assigning it to the scene."""
-    abs_path = os.path.join(blend_dir, asset_name+".blend")
-
-    # Check if it already exists locally.
-    existing_coll = next((c for c in bpy.data.collections if c.name==asset_name and c.library), None)
-    if existing_coll:
-        # Collection exists, so just return it.
-        return existing_coll
-
-    if not os.path.isfile(abs_path):
-        return
-
-    # Link collection from asset .blend file.
-    with bpy.data.libraries.load(abs_path, link=True, relative=True) as (
-        data_from,
-        data_to,
-    ):
-        for coll in data_from.collections:
-            if coll == asset_name:
-                data_to.collections.append(coll)
-
-    new_coll = bpy.data.collections.get(asset_name)
-    if not new_coll:
-        return
-
-    return new_coll
-
-
-def load_instance_database() -> dict:
-    # This cache and database was taken from the source code of bmubin.
-    # No idea how the bmubin dev generated this, but likely the same way as projects like ice-spear,
-    # by being much smarter than me and reading .sbfres binary data.
-    # Many thanks!
-    instance_database = {}
-
-    with open(INSTANCE_CACHE_ZIP, "rb") as f:
-        zip_data = f.read()
-
-        # Load the .zip file into memory
-        with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
-            for file_name in z.namelist():
-                with z.open(file_name) as file:
-                    instance_database[file_name] = json.loads(file.read())
-
-    return instance_database
 
 all_dae_paths_cached = []
 def get_all_dae_paths(dae_dir):
@@ -281,6 +154,24 @@ def get_dae_files_to_process(dae_dir, blend_dir, overwrite=False, ignore=[], ass
 
     return dae_to_blend_map
 
+def load_instance_database() -> dict:
+    # This cache and database was taken from the source code of bmubin.
+    # No idea how the bmubin dev generated this, but likely the same way as projects like ice-spear,
+    # by being much smarter than me and reading .sbfres binary data.
+    # Many thanks!
+    instance_database = {}
+
+    with open(INSTANCE_CACHE_ZIP, "rb") as f:
+        zip_data = f.read()
+
+        # Load the .zip file into memory
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
+            for file_name in z.namelist():
+                with z.open(file_name) as file:
+                    instance_database[file_name] = json.loads(file.read())
+
+    return instance_database
+
 def create_shared_memory(data):
     """Serializes a dictionary and writes it to shared memory."""
     serialized_data = pickle.dumps(data)  # Convert dict to bytes
@@ -295,7 +186,6 @@ def create_shared_memory(data):
     print(f"Shared memory '{shm.name}' ensured.")
 
     return shm
-
 
 def build_asset_library(dae_to_blend_map: dict[str, str], quiet=True, workers=8, timeout=180):
     start_time = time.time()
@@ -323,7 +213,7 @@ def build_asset_library(dae_to_blend_map: dict[str, str], quiet=True, workers=8,
 
     for dae_file, blend_file in file_pairs:
         start_time = time.time()  # Record start time
-        future = executor.submit(build_asset, dae_file, blend_file, quiet, True, timeout)
+        future = executor.submit(subprocess_import_asset, dae_file, blend_file, quiet, True, timeout)
         start_times[future] = start_time  # Track when each future started
         futures.append(future)
 
@@ -356,7 +246,7 @@ def build_asset_library(dae_to_blend_map: dict[str, str], quiet=True, workers=8,
     shared_memory.close()
     shared_memory.unlink()
 
-def build_asset(dae_path, blend_path, quiet=True, background=True, timeout_s=180, shared_mem=("", 0)):
+def subprocess_import_asset(dae_path, blend_path, quiet=True, background=True, timeout_s=180, shared_mem=("", 0)):
     bg = None
     if background:
         bg = '--background'
@@ -397,5 +287,4 @@ def build_asset(dae_path, blend_path, quiet=True, background=True, timeout_s=180
 
 registry = [
     OBJECT_OT_botw_build_assetlib_for_map,
-    OBJECT_OT_botw_import_map_section,
 ]

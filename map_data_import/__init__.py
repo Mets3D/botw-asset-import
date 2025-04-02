@@ -1,6 +1,7 @@
 module_names = [
     "build_asset_library",
-    "build_asset"
+    "build_asset",
+    "load_map_section",
 ]
 
 modules = [

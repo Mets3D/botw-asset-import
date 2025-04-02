@@ -31,6 +31,7 @@ def ensure_widget(wgt_name, source_file="") -> Object:
             if o == wgt_name:
                 data_to.objects.append(o)
 
-    new_wgt_ob = bpy.data.objects.get((wgt_name, None))
+    lib = next((lib.filepath for lib in bpy.data.libraries if lib.filepath.endswith("resources.blend")), None) if link else None
+    new_wgt_ob = bpy.data.objects.get((wgt_name, lib))
 
     return new_wgt_ob

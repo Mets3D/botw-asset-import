@@ -28,6 +28,7 @@ class SCENE_OT_import_batch_seanim(bpy.types.Operator):
         description="If an animation already seems to exist in the .blend file, overwrite it. If this is False, the animation will be skipped instead",
         default=False
     )
+    rename_actions: BoolProperty(name="Rename Actions", description="Remove some unnecessary parts of action names.")
 
     @classmethod
     def poll(cls, context):
@@ -127,8 +128,10 @@ class SCENE_OT_import_batch_seanim(bpy.types.Operator):
         for pb in rig.pose.bones:
             pb.matrix_basis.identity()
 
-        return {'FINISHED'}
+        if self.rename_actions:
+            rename_actions(actions)
 
+        return {'FINISHED'}
 
 class SCENE_OT_fix_botw_anims(bpy.types.Operator):
     """Fix BotW animation roots using baking and shennanigans"""
@@ -177,6 +180,32 @@ class SCENE_OT_fix_botw_anims(bpy.types.Operator):
             fix_root_motion_with_baking(context, context.active_object, actions)
         return {'FINISHED'}
 
+def rename_actions(actions):
+    REMOVE = ["Default_", "Demo_", "Act_", "Normal_", "Common_", "Gd_General_", "GdQueen_", "Npc_TripMaster_", "Npc_Hylia_Johnny_", "Npc_Escort_", "Npc_King_Vagrant_", "UC_M_", "Npc_Shiekah_Heir_", "Npc_Shiekah_Artist_", "AncientDoctor_Hateno_", "Npc_Rito_Teba_", "Minister_", "UR_M_", "Move_", "Test_"]
+
+    SWAPS = {
+        'SitGround' : 'Ground',
+        'SitChair' : 'Chair',
+        'Negative_' : 'Neg_'
+    }
+
+    for action in actions:
+        new_name = action.name
+        for word in REMOVE:
+            if word in new_name:
+                new_name = new_name.replace(word, "")
+        
+        for find, replace in SWAPS.items():
+            if find in new_name:
+                new_name = new_name.replace(find, replace)
+
+        if action.name != new_name:
+            counter = 1
+            while new_name in bpy.data.actions:
+                new_name = new_name + str(counter)
+                counter += 1
+            print(action.name, " -> ", new_name)
+            action.name = new_name
 
 def fix_root_motion_with_baking(context, rig, actions):
     """Animations import with a root bone rotation of 90 degrees, and I couldn't figure out the math for fixing the fcurves, and this feels safer."""

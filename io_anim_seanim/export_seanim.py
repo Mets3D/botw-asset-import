@@ -7,10 +7,8 @@ from . import seanim as SEAnim
 
 # <pep8 compliant>
 
-# TODO: Add support for defining modifier bones for Absolute anims
-
 # This is the scale multiplier for exported anims
-g_scale = 1  # TODO - Proper scaling
+g_scale = 1
 
 
 def get_loc_vec(bone, anim_type):
@@ -18,8 +16,6 @@ def get_loc_vec(bone, anim_type):
             bone.parent is not None):
         return bone.parent.matrix.inverted() @ bone.matrix.translation
     return bone.matrix_basis.translation
-
-# TODO: Support for SEANIM_TYPE_ADDITIVE
 
 
 def get_rot_quat(bone, anim_type):

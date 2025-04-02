@@ -452,9 +452,10 @@ def process_object(collection, obj, asset_name, uniqify_names=False, clean_names
                 obj.modifiers.remove(mod)
 
         for uv_layer, name in zip(obj.data.uv_layers, ("Albedo", "SPM")):
-            # NOTE: I shouldn't have force-named the UV maps by their "purpose" since it often isn't accurate. But it's kinda too late to fix now. Sorry!
-            # NOTE: Sometiems there's also a 3rd UV layer.
-            # TODO: Might need a check here to see if all coordinates are at (0,0) and remove if so.
+            # NOTE: I shouldn't have force-named the UV maps by their "purpose" since it often isn't accurate. 
+            # But it's kinda too late to fix now. Sorry!
+            # Sometimes there's also a 3rd UV layer.
+            # TODO: Might want to check here to see if all coordinates are at (0,0) and remove if so.
             uv_layer.name = name
 
         for mat in obj.data.materials:
@@ -743,7 +744,7 @@ def process_material(collection, obj, material):
 
     # Create image nodes, guess UV layer by name, set image color spaces
     with Timer("Hookup tex nodes", material.name):
-        spm_has_green = hookup_texture_nodes(collection, material, shader_node, socket_map)
+        spm_has_green = hookup_texture_nodes(collection, obj, material, shader_node, socket_map)
         hookup_rgb_nodes(material, shader_node)
 
     set_shader_socket_values(collection, obj, material, shader_node, spm_has_green)
@@ -1166,7 +1167,6 @@ def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
     elif "clrmak_02" in lc_img_name or "clrmsk_02" in lc_img_name:
         return "Tint Mask 2"
     elif "_spm" in lc_img_name:
-        # TODO: Differentiate Spm, Spm.1 and Spm.2?
         return "SPM"
     elif "_nrm" in lc_img_name:
         return "Normal Map"
@@ -1200,27 +1200,14 @@ def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
 
     return ""
 
-def create_helper_nodes(collection, material, img_node, pixel_image, socket_name, shader_node, albedo_count=0, dye_count=0, use_dye_labels=False) -> tuple[int, int]:
+def create_helper_nodes(collection, object, material, img_node, pixel_image, socket_name, shader_node, albedo_count=0, dye_count=0, use_dye_labels=False) -> tuple[int, int]:
     shader_name = shader_node.node_tree.name
     nodes = material.node_tree.nodes
     links = material.node_tree.links
 
     lc_assetname = (collection.get('asset_name') or "").lower()
 
-    ensure_UV_node(material, img_node, shader_name)
-
-    if 'Hylian Nose' in collection['asset_name']:
-        # TODO: Test this again, this special case should no longer be necessary since we implemented .json material data.
-        UMii_node = nodes.get("PingPong UVs")
-        if not UMii_node:
-            UMii_nt = ensure_nodetree("BotW: UMii Face UVs")
-            UMii_node = nodes.new("ShaderNodeGroup")
-            UMii_node.node_tree = UMii_nt
-            UMii_node.name = "PingPong UVs"
-            UMii_node.location = img_node.location + Vector((-400, 0))
-            UMii_node.width = 300
-        set_socket_value(shader_node, 'Albedo Tint', [0.291138, 0.190097, 0.088846, 1.000000])
-        links.new(UMii_node.outputs[0], img_node.inputs[0])
+    ensure_UV_node(object, material, img_node, shader_name)
 
     if shader_name == 'BotW: Eye' and socket_name in ('Albedo', 'Emission Color', 'Emission Mask', 'Normal Map') and len(img_node.inputs) > 0:
         eye_rig_node = nodes.get("Eye Rig")
@@ -1289,15 +1276,37 @@ def create_helper_nodes(collection, material, img_node, pixel_image, socket_name
 
     return albedo_count, dye_count
 
-def ensure_UV_node(material, img_node, shader_name):
+def ensure_UV_node(object, material, img_node, shader_name):
     if img_node.type != 'TEX_IMAGE':
         return
 
     nodes = material.node_tree.nodes
     links = material.node_tree.links
 
+    img = img_node.image
+    tex_data = get_tex_data(material, img)
+    if tex_data:
+        pong_x = tex_data['WrapModeS'] == 'Mirror'
+        pong_y = tex_data['WrapModeT'] == 'Mirror'
+        if pong_x or pong_y:
+            pingpong_node = nodes.get("PingPong UVs")
+            if not pingpong_node:
+                pingpong_nt = ensure_nodetree("BotW: UMii Face UVs")
+                pingpong_node = nodes.new("ShaderNodeGroup")
+                pingpong_node.node_tree = pingpong_nt
+                pingpong_node.name = "PingPong UVs"
+                pingpong_node.location = img_node.location + Vector((-400, 0))
+                pingpong_node.width = 300
+            if pong_x:
+                set_socket_value(pingpong_node, 'PingPong X', True)
+            if pong_y:
+                set_socket_value(pingpong_node, 'PingPong Y', True)
+            links.new(pingpong_node.outputs[0], img_node.inputs[0])
+            # I think non-default WrapModes always use the first UV map, so imma just return here.
+            return
+
     lc_img_name = img_node.image.name.lower()
-    if len(img_node.inputs) > 0:
+    if len(object.data.uv_layers) > 1:
         uses_first_uvmap = texture_uses_first_uvmap(material, img_node.image)
         if "_alb" in lc_img_name and "damage" in lc_img_name:
             uses_first_uvmap = False
@@ -1320,25 +1329,6 @@ def ensure_UV_node(material, img_node, shader_name):
                 links.new(uv_node.outputs[0], fallback_node.inputs[0])
             links.new(fallback_node.outputs[0], img_node.inputs[0])
 
-    img = img_node.image
-    tex_data = get_tex_data(material, img)
-    if tex_data:
-        pong_x = tex_data['WrapModeS'] == 'Mirror'
-        pong_y = tex_data['WrapModeT'] == 'Mirror'
-        if pong_x or pong_y:
-            pingpong_node = nodes.get("PingPong UVs")
-            if not pingpong_node:
-                pingpong_nt = ensure_nodetree("BotW: UMii Face UVs")
-                pingpong_node = nodes.new("ShaderNodeGroup")
-                pingpong_node.node_tree = pingpong_nt
-                pingpong_node.name = "PingPong UVs"
-                pingpong_node.location = img_node.location + Vector((-400, 0))
-                pingpong_node.width = 300
-            if pong_x:
-                set_socket_value(pingpong_node, 'PingPong X', True)
-            if pong_y:
-                set_socket_value(pingpong_node, 'PingPong Y', True)
-            links.new(pingpong_node.outputs[0], img_node.inputs[0])
 
 def get_shader_data(material) -> dict:
     """Tried to optimize json loading by caching but it's insignificant."""
@@ -1358,16 +1348,12 @@ def get_tex_data(material, img) -> dict:
     return next((data for name, data in tex_maps.items() if name == Path(img.filepath).stem), {})
 
 def get_alpha_mode(material) -> str:
-    """Not as useful as I hoped.
-    The game uses the "AlphaMask" mode for both decals, and objects with transparent edges.
-    But in Blender, decals must be set to Blended, and other objects to Dithered. 
-    Otherwise, decals would get z-fighting artifacts, and other objects would be weirdly translucent.
-    TODO: I think decals (that have z-fighting issues) might have a shading flag that we could use to apply a displacement material to resolve the z-fighting.
-    """
+    """Trying to guess what EEVEE alpha blending mode to use based on the 
+    horrendous material data available."""
 
     alpha_flag = get_shader_property(material, 'MaterialU.RenderState._flags') or 1
 
-    # These are complete guesses atm. TODO: improve this mapping.
+    # NOTE: The keys are all the keys that occur in the game's materials, but the values are my guesses.
     zelda_blend_modes = {
         1: 'Opaque',        # 13553 cases
         2: 'AlphaMask',     # 3785 cases
@@ -1377,18 +1363,24 @@ def get_alpha_mode(material) -> str:
     }
     blend_mode = zelda_blend_modes.get(alpha_flag, "AlphaMask")
 
+    maybe_translucency_flag = get_shader_property(material, 'shaderassign.options.gsys_gbuffer_xlu')
+    if maybe_translucency_flag:
+        return 'BLENDED'
+    # shaderassign.options.uking_enable_gbuffer_xlu_blend
+    # shaderassign.options.gsys_force_zprepass
+
     return 'BLENDED' if blend_mode == 'Translucent' else 'DITHERED'
 
 def texture_uses_first_uvmap(material, img) -> bool or None:
-    """So, there's no guaranteed way to easily guess if a texture uses the 2nd UVMap,
-    but there is a solid bet to guess if it is using the first UVMap.
-    So if this function returns False, it will either use 2nd UVMap, or some procedural UVMap,
-    such as scrolling UVs.
-    """
+    """An educated guess."""
     tex_data = get_tex_data(material, img)
     if not tex_data:
         return True
     tex_idx = tex_data['textureUnit'] - 1
+
+    # There are some other values here that could be relevant but I can't find solid correlations, as usual.
+    # enable_texcoord = get_shader_property(material, f'shaderassign.options.uking_enable_texcoord{tex_idx}')
+    # texcoord_mapping = get_shader_property(material, f'shaderassign.options.uking_texcoord{tex_idx}_mapping')
 
     # NOTE: TotK equivalent is apparently `o_texture{tex_idx}_texcoord`.
     uv_idx = get_shader_property(material, f'shaderassign.options.uking_texture{tex_idx}_texcoord')
@@ -1447,8 +1439,12 @@ def get_shader_property(material, prop_path, index=None):
             break
 
     if not prop:
-        # TODO: This should technically support wildcards.
         prop = CACHE_mat_defaults.get(prop_path, None)
+    if not prop:
+        for key, value in CACHE_mat_defaults.items():
+            if "*" in key and re.match(key.replace("*", ".*"), prop_path):
+                prop = value
+                break
     if not prop:
         return
 
@@ -1500,11 +1496,10 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
     lc_obname = obj.name.lower()
     lc_dirname = (collection.get('dirname') or "").lower()
     lc_assetname = (collection.get('asset_name') or "").lower()
-    metal, rubber, hair = False, False, False
 
     links = material.node_tree.links
 
-    # Set the Metal/Rubber/Hair checkboxes
+    metal, rubber, hair = False, False, False
     rubbery_words = ['rubber']
     hairy_words = ['hair', 'hari', 'fur', 'mane']
     if spm_has_green:
@@ -1542,6 +1537,8 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
     if 'Hylian Glasses' in collection['asset_name']:
         set_socket_value(shader_node, 'Tint 0 Color', [0.023805, 0.023805, 0.023805, 1.000000])
         set_socket_value(shader_node, 'Metal', True)
+    if 'Hylian Nose' in collection['asset_name']:
+        set_socket_value(shader_node, 'Albedo Tint', [0.291138, 0.190097, 0.088846, 1.000000])
 
     if shader_node.node_tree.name == 'BotW: Material Blend':
         set_socket_value(shader_node, "Transparent Edges", get_shader_property(material, 'isTransparent') or False)

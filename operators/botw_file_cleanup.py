@@ -5,6 +5,7 @@ from mathutils import Euler
 from math import pi
 
 from .botw_batch_asset_import import get_albedo_img_node
+from .botw_batch_seanim_import import rename_actions
 from ..databases.asset_names import asset_names
 
 from ..utils.action import remove_redundant_keyframes, remove_negative_frames, fix_groups
@@ -77,7 +78,7 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
         if self.organize_by_catalogs:
             asset_catalogs_to_scene_collection(context)
         if self.rename_actions:
-            rename_actions()
+            rename_actions(bpy.data.actions)
         if self.deduplicate_images:
             print("Deduplicating textures...")
             deduplicate_textures()
@@ -131,34 +132,6 @@ def report_local_nodegroups():
         if not ng.library:
             print("Local nodegroup: ", ng.name)
 
-def rename_actions():
-    # TODO: This should move to the batch .seanim import operator.
-    REMOVE = ["Default_", "Demo_", "Act_", "Normal_", "Common_", "Gd_General_", "GdQueen_", "Npc_TripMaster_", "Npc_Hylia_Johnny_", "Npc_Escort_", "Npc_King_Vagrant_", "UC_M_", "Npc_Shiekah_Heir_", "Npc_Shiekah_Artist_", "AncientDoctor_Hateno_", "Npc_Rito_Teba_", "Minister_", "UR_M_", "Move_", "Test_"]
-
-    SWAPS = {
-        'SitGround' : 'Ground',
-        'SitChair' : 'Chair',
-        'Negative_' : 'Neg_'
-    }
-
-    for a in bpy.data.actions:
-        new_name = a.name
-        for word in REMOVE:
-            if word in new_name:
-                new_name = new_name.replace(word, "")
-        
-        for find, replace in SWAPS.items():
-            if find in new_name:
-                new_name = new_name.replace(find, replace)
-
-        if a.name != new_name:
-            counter = 1
-            while new_name in bpy.data.actions:
-                new_name = new_name + str(counter)
-                counter += 1
-            print(a.name, " -> ", new_name)
-            a.name = new_name
-
 def report_texts():
     for t in bpy.data.texts:
         print("Text: ", t.name)
@@ -182,7 +155,6 @@ def ensure_lighting():
     sphere.location = (0, -1, 1)
 
 def remove_custom_props():
-    # TODO: Move this to the import operator.
     bad_props = ['cloudrig', 'cloudrig_prefs', 'cycles', 'cloudrig_component', 'existing_img']
     for obj in bpy.data.objects:
         things = [obj]

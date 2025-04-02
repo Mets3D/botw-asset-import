@@ -10,7 +10,7 @@ from . import seanim as SEAnim
 # <pep8 compliant>
 
 # This is the scale multiplier for exported anims
-g_scale = 1  # TODO - Proper scaling
+g_scale = 1
 
 # A list (in order of priority) of bone names to automatically search for
 # when determining which bone to use as the root for delta anims

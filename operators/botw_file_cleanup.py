@@ -1,14 +1,12 @@
-import bpy, os, re, hashlib
+import bpy, os, hashlib
 from bpy.props import BoolProperty
 
-from mathutils import Matrix, Vector, Euler
+from mathutils import Euler
 from math import pi
 
-from .asset_thumbnail_render import crop_asset_preview
-from .botw_batch_asset_import import PRIMITIVE_NAMES, GARBAGE_MATS, fix_material_viewport_display, get_albedo_img_node, set_object_color, ensure_nodetree, cleanup_fbx_armature
+from .botw_batch_asset_import import get_albedo_img_node
 from ..databases.asset_names import asset_names
 
-from ..utils.collections import find_layer_collection_by_collection
 from ..utils.action import remove_redundant_keyframes, remove_negative_frames, fix_groups
 from ..utils.catalogs import asset_catalogs_to_scene_collection
 from ..utils.pixel_image import PixelImage
@@ -32,7 +30,6 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
     report_issues: BoolProperty(name="Report Issues", description="Report issues that may need manual checking. This is always safe to enable.", default=True)
     reveal_asset_collections: BoolProperty(name="Ensure Visible Asset Collections", default=True)
 
-    rename_ids: BoolProperty(name="Rename IDs", description="Remove garbage strings from names of objects, collections, materials. Changes will be printed to terminal.")
     rename_actions: BoolProperty(name="Rename Actions", description="Rename Actions to have better names. Changes will be printed to terminal.")
     rename_materials: BoolProperty(name="Rename Materials", description="Rename materials to the name of their albedo texture if available.")
 
@@ -59,7 +56,6 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
         header, panel = layout.panel(idname="Cleanup (Rename)")
         header.label(text="Rename")
         if panel:
-            panel.prop(self, 'rename_ids')
             panel.prop(self, 'rename_actions')
             panel.prop(self, 'rename_materials')
 
@@ -104,14 +100,11 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
         remove_custom_props()
         ensure_lighting()
 
-        if self.rename_ids:
-            rename_ids()
         if self.rename_materials:
             rename_materials_to_albedo()
 
         self.report({'INFO'}, "Cleanup complete.")
         return {'FINISHED'}
-
 
 def rename_materials_to_albedo():
     for mat in bpy.data.materials:
@@ -174,68 +167,6 @@ def report_libraries():
     for lib in bpy.data.libraries:
         if not lib.filepath.startswith("//") or ".." in lib.filepath:
             print("Suspicious library: ", lib.filepath)
-
-def rename_ids():
-    # TODO: Move this logic to the import operator.
-    trash = PRIMITIVE_NAMES + ["_Model", "_Root", "_lowpoly", "_low", "__abc", "_Mdl"]
-    swap = {
-        "  " : " ",
-        "D L C" : "DLC"
-    }
-    for container in (bpy.data.objects, bpy.data.collections, bpy.data.materials):
-        for id in container[:]:
-            if id.library or id.override_library:
-                continue
-
-            org_name = id.name
-
-            # Nuke certain strings
-            for word in trash:
-                id.name = id.name.replace(word, "")
-
-            # Find and replace as per the `swap` dict
-            for find, replace in swap.items():
-                if find in id.name:
-                    id.name = id.name.replace(find, replace)
-
-            # Remove double spaces
-            if "  " in id.name:
-                id.name = id.name.replace("  ", " ")
-
-            # Remove _001
-            suffix_pattern = re.compile(r"\_\d{3}$")
-            if suffix_pattern.search(id.name):
-                id.name = suffix_pattern.sub("", id.name)
-
-            # Remove .001
-            suffix_pattern = re.compile(r"\.\d{3}$")
-            if suffix_pattern.search(id.name):
-                id.name = suffix_pattern.sub("", id.name)
-
-            # Remove _group###
-            suffix_pattern = re.compile(r"_group\d*$")
-            if suffix_pattern.search(id.name):
-                id.name = suffix_pattern.sub("", id.name)
-
-            if "_MT_" in id.name:
-                id.name = id.name.split("_MT_")[1]
-
-            # Remove numbers from end unless preceeded by a symbol (usually . or _)
-            suffix_pattern = re.compile(r"(?<=[A-Za-z])\d+$")
-            if suffix_pattern.search(id.name):
-                id.name = suffix_pattern.sub("", id.name)
-
-            # Print if name changed.
-            if id.name != org_name:
-                print("Renamed ", org_name, " -> ", id.name)
-
-    for obj in bpy.data.objects:
-        if obj.library or obj.override_library:
-            continue
-        if obj.data:
-            obj.data.name = obj.name
-        if hasattr(obj.data, 'shape_keys') and obj.data.shape_keys:
-            obj.data.shape_keys.name = obj.name
 
 def ensure_lighting():
     sun = bpy.data.objects['LGT-botw-sun']

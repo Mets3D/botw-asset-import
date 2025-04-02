@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import AddonPreferences
-from bpy.props import StringProperty, BoolProperty
+from bpy.props import StringProperty, EnumProperty
 from . import __package__ as base_package
 
 class BotWImportPreferences(AddonPreferences):
@@ -22,15 +22,13 @@ class BotWImportPreferences(AddonPreferences):
         description="If the path to the Bear's Eat animation is this:\nD:\\BotW Extracted\\Animations\\Animal_Bear_Animation\\Eat.seanim\nThen in this box you should browse this:\nD:\\BotW Extracted\\Animations\\"
     )
 
-    rename_collections: BoolProperty(
-        name="Rename Collections",
-        description="Try to make collection names more human-readable using name tables, prefix stripping, and other string operations. Useful when trying to create an asset library, but may be undesired if you want to do further scripting work on the assets. Note that regardless of this option, the original collection name is always stored in a 'file_name' custom property",
-        default=True
-    )
-    rename_obj_mat: BoolProperty(
-        name="Rename Objects",
-        description="Make object/material names more human-readable by discarding default object names of 3D modeling softwares (pCube, pCylinder, etc), and the _Mt_ prefix",
-        default=True
+    resource_append_mode: EnumProperty(
+        name="Resource Load Mode",
+        items=[
+            ('APPEND', "Append", "Make a local copy of bone widgets and shader nodegroups"),
+            ('LINK', "Link", "Link bone widgets and shader nodegroups from the add-on's resources.blend file"),
+        ],
+        description="Note: World and Lights will always be appended, as linking them would be kinda pointless"
     )
 
     def draw(self, context):
@@ -43,11 +41,7 @@ class BotWImportPreferences(AddonPreferences):
         layout.prop(self, 'game_anims_folder')
 
         layout.separator()
-        row = layout.row()
-        row.alignment = 'LEFT'
-        row.label(text="Rename:")
-        row.prop(self, 'rename_collections', text="", icon='OUTLINER_COLLECTION')
-        row.prop(self, 'rename_obj_mat', text="", icon='OBJECT_DATAMODE')
+        layout.row().prop(self, 'resource_append_mode', expand=True)
 
 def get_addon_prefs(context=None):
     if not context:

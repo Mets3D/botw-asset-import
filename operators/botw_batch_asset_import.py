@@ -1,4 +1,4 @@
-import bpy, os, re, json, zipfile, io
+import bpy, os, re, json, zipfile, io, glob
 from bpy.props import BoolProperty, StringProperty
 from collections import OrderedDict
 from math import pi, radians
@@ -22,7 +22,7 @@ from ..utils.dae_fixer import fix_dae_uvmaps_in_place
 PRINT_LATER = []
 
 # These things are case-sensitive but it shouldn't matter.
-# TODO: Could make this extension agnostic.
+# TODO: Could make this extension-agnostic.
 ICON_EXTENSION = ".jpg"
 TEXTURE_EXTENSION = ".png"
 
@@ -142,14 +142,18 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     bl_options = {'REGISTER', 'UNDO'}
 
     directory: StringProperty(subtype='FILE_PATH', options={'SKIP_SAVE', 'HIDDEN'})
-    rename_known_assets: BoolProperty(name="Rename Known Assets", description="If an object's name is found in the asset name map, rename it to that", default=True)
-    rename_unknown_assets: BoolProperty(name="Rename Unknown Assets", description="If an object's name isn't found in the asset name map, rename it to title case and remove some prefixes", default=True)
-    create_parent_collections: BoolProperty(name="Create Parent Collections", description="When a directory has more than 1 file, create a parent collection that represents that directory", default=True)
+    rename_known_assets: BoolProperty(name="Rename Known Assets", description="If an asset's name is found in the asset name map, rename it to that", default=True)
+    rename_unknown_assets: BoolProperty(name="Rename Unknown Assets", description="If an asset's name isn't found in the asset name map, rename it to title case and remove some prefixes", default=True)
 
     rename_prepend: BoolProperty(name="Prepend Asset to Object Names", description="Prepend asset name to object and material names. Useful when importing many assets into a single file to keep names unique, but can also result in exceeding the 63-character limit. Those cases will be skipped (not renamed)", default=True)
     rename_clean_names: BoolProperty(name="Clean Object & Material Names", description="", default=True)
 
-    deduplicate_materials: BoolProperty(name="Deduplicate Materials", description="If two identicals end up identical, remap users on one of them.", default=True)
+    apply_transforms: BoolProperty(name="Apply Transforms", description="Objects import with correct transforms, but in some cases that means having a 90 degree rotation on X. This should probably only be disabled if you're a modder and you need to", default=True)
+    remove_redundant_armatures: BoolProperty(name="Remove Redundant Armatures", description="If an armature has only 1 bone and it's at the world origin, or if it doesn't deform any objects with any of its bones, remove it", default=True)
+    
+    create_parent_collections: BoolProperty(name="Create Parent Collections", description="When a directory has more than 1 file, create a parent collection that represents that directory", default=True)
+
+    deduplicate_materials: BoolProperty(name="Deduplicate Materials", description="If two materials end up with identical nodetrees, merge them into one", default=True)
 
     force_update_caches: BoolProperty(default=False)
 
@@ -158,9 +162,18 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         layout.prop(self, 'rename_known_assets')
         if self.rename_known_assets:
             layout.prop(self, 'rename_unknown_assets')
-        layout.prop(self, 'rename_ob_mat_unique')
-        layout.prop(self, 'rename_ob_mat_clean')
+        layout.prop(self, 'rename_prepend')
+        layout.prop(self, 'rename_clean_names')
+        layout.separator()
+
         layout.prop(self, 'create_parent_collections')
+        layout.separator()
+
+        layout.prop(self, 'apply_transforms')
+        if self.apply_transforms:
+            layout.prop(self, 'remove_redundant_armatures')
+        layout.separator()
+
         layout.prop(self, 'deduplicate_materials')
 
     def execute(self, context):
@@ -170,6 +183,17 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         if not self.directory:
             self.report({'WARNING'}, "No folder selected")
             return {'CANCELLED'}
+
+        any_dae_files = dae_files = glob.glob(f"{self.directory}/**/*.dae", recursive=True)
+        if not any_dae_files:
+            self.report({'WARNING'}, "No .dae files were found anywhere in this folder or its sub-folders.")
+            return {'CANCELLED'}
+
+        # Ensure dependent settings aren't enabled without their dependency.
+        if not self.apply_transforms:
+            self.remove_redundant_armatures = False
+        if not self.rename_known_assets:
+            self.rename_unknown_assets = False
 
         with Timer("Load caches"):
             ensure_caches(self.force_update_caches)
@@ -195,13 +219,22 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             for dae_name in dae_files:
                 asset_name = dae_name.replace(".dae", "")
                 if self.rename_known_assets:
-                    asset_name = derive_asset_name(dae_name, dirname, len(dae_files)==1, self.rename_unknown_assets)
+                    asset_name = derive_asset_name(dae_name, dirname, len(dae_files)==1, remove_prefixes=self.rename_unknown_assets)
 
                 if 'Animation' in asset_name:
                     continue
                 full_path = os.path.join(root, dae_name)
                 with Timer("Full Import", dae_name):
-                    imported_objects += import_and_setup_single_dae(context, full_path, asset_name, parent_coll, uniqify_names=self.rename_prepend, clean_names=self.rename_clean_names)
+                    imported_objects += import_and_setup_single_dae(
+                        context, 
+                        full_path, 
+                        asset_name, 
+                        parent_coll, 
+                        uniqify_names=self.rename_prepend, 
+                        clean_names=self.rename_clean_names,
+                        apply_transforms=self.apply_transforms,
+                        remove_redundant_armatures=self.remove_redundant_armatures,
+                    )
             counter += 1
 
         for lateprint in PRINT_LATER:
@@ -323,20 +356,30 @@ def ensure_world_and_lights(context) -> bpy.types.World:
                 data_to.worlds.append(world)
 
     # Ensure the lighting objects are linked to the scene and de-duplicated.
-    for ob in bpy.data.objects[:]:
-        if 'LGT-botw' in ob.name:
-            if ob.name.endswith(".001"):
-                existing = bpy.data.objects.get(ob.name[:-4])
-                ob.user_remap(existing)
-                bpy.data.objects.remove(ob)
-                ob = existing
-            if ob not in set(context.scene.collection.all_objects):
-                context.scene.collection.objects.link(ob)
+    for obj in bpy.data.objects[:]:
+        if 'LGT-botw' in obj.name:
+            if obj.name.endswith(".001"):
+                existing = bpy.data.objects.get(obj.name[:-4])
+                obj.user_remap(existing)
+                bpy.data.objects.remove(obj)
+                obj = existing
+            if obj not in set(context.scene.collection.all_objects):
+                context.scene.collection.objects.link(obj)
     
     world = bpy.data.worlds.get(WORLD_NAME)
     return world
 
-def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll=None, rename_coll=True, uniqify_names=False, clean_names=True) -> list[bpy.types.Object]:
+def import_and_setup_single_dae(
+        context, 
+        full_path: str, 
+        asset_name: str=None, 
+        parent_coll=None, 
+        rename_coll=True, 
+        uniqify_names=False, 
+        clean_names=True,
+        apply_transforms=True,
+        remove_redundant_armatures=True
+    ) -> list[bpy.types.Object]:
     dae_filename = os.path.basename(full_path)
     asset_name = asset_name or os.path.splitext(dae_filename)[0]
     dirname = os.path.basename(os.path.dirname(full_path))
@@ -354,8 +397,8 @@ def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll
     set_active_collection(context, collection)
 
     with Timer("Import .dae + .fbx", asset_name):
-        objs = import_dae(context, full_path, discard_types=('EMPTY'))
-        objs = import_and_merge_fbx_armature(context, dae_objs=objs, dae_path=full_path, asset_name=asset_name)
+        objs = import_dae(context, full_path, discard_types=('EMPTY'), apply_transforms=apply_transforms)
+        objs = import_and_merge_fbx_armature(context, dae_objs=objs, dae_path=full_path, asset_name=asset_name, apply_transforms=apply_transforms)
     if not objs:
         return []
 
@@ -372,19 +415,19 @@ def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll
 
     ret_objs = []
     for obj in objs:
-        cleaned = process_object(collection, obj, asset_name, uniqify_names, clean_names)
-        if cleaned:
-            ret_objs.append(cleaned)
+        obj = process_object(collection, obj, asset_name, uniqify_names, clean_names, remove_redundant_armatures)
+        if obj:
+            ret_objs.append(obj)
+            hide_obj_if_useless(collection, obj)
 
-    hide_some_objects(collection, obj)
 
     return ret_objs
 
-def process_object(collection, obj, asset_name, uniqify_names=False, clean_names=True):
+def process_object(collection, obj, asset_name, uniqify_names=False, clean_names=True, remove_redundant_armatures=True):
     if obj.type == 'ARMATURE':
         if obj.animation_data and obj.animation_data.action:
             obj.animation_data.action = None
-        if len(obj.data.bones) < 2:
+        if remove_redundant_armatures and not is_armature_useful(obj):
             bpy.data.objects.remove(obj)
             return
     elif obj.type == 'MESH':
@@ -449,6 +492,19 @@ def process_object(collection, obj, asset_name, uniqify_names=False, clean_names
     obj.data.name = obj.name
     return obj
 
+def is_armature_useful(arm_ob) -> bool:
+    """Returns True if it deforms any of its child objects and consists of 
+    more than just a deforming root bone at the origin."""
+    if len(arm_ob.data.bones) == 1 and abs(arm_ob.data.bones[0].head.length) < 0.00001:
+        return False
+
+    def_bones = [b.name for b in arm_ob.data.bones if b.use_deform]
+    for child_ob in arm_ob.children_recursive:
+        if hasattr(child_ob, 'vertex_groups'):
+            if any([vg.name in def_bones for vg in child_ob.vertex_groups]):
+                return True
+    return False
+
 def rename_object(obj):
     new_name = obj.name
     if "_Mt_" in new_name:
@@ -511,7 +567,7 @@ def tidy_name(name):
 
     return new_name
 
-def hide_some_objects(collection, obj):
+def hide_obj_if_useless(collection, obj):
     """Hide specific troublesome objects."""
     hide = False
     if any([s in obj.name for s in GARBAGE_MATS]):
@@ -528,7 +584,7 @@ def hide_some_objects(collection, obj):
 
     obj.hide_viewport, obj.hide_render = hide, hide
 
-def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, asset_name):
+def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, asset_name, apply_transforms=True):
     """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
     dae_armatures = [ob for ob in dae_objs if ob.type=='ARMATURE']
     if not dae_armatures:
@@ -540,7 +596,7 @@ def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, asset_name):
     armatures_to_replace = [a for a in dae_objs if a.type=='ARMATURE' if len(a.pose.bones) > 1 or 'Root' not in a.pose.bones]
     if not armatures_to_replace:
         return dae_objs
-    fbx_armatures = import_fbx(context, fbx_path, discard_types=('EMPTY', 'MESH'))
+    fbx_armatures = import_fbx(context, fbx_path, discard_types=('EMPTY', 'MESH'), apply_transforms=apply_transforms)
     if not fbx_armatures:
         return
 
@@ -562,14 +618,14 @@ def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, asset_name):
 
     return ret_objs
 
-def import_fbx(context, filepath, discard_types=('MESH', 'EMPTY')):
-    return import_dae_or_fbx(context, is_dae=False, filepath=filepath, discard_types=discard_types)
+def import_fbx(context, filepath, discard_types=('MESH', 'EMPTY'), apply_transforms=True):
+    return import_dae_or_fbx(context, is_dae=False, filepath=filepath, discard_types=discard_types, apply_transforms=apply_transforms)
 
-def import_dae(context, filepath, discard_types=('EMPTY')):
+def import_dae(context, filepath, discard_types=('EMPTY'), apply_transforms=True):
     fix_dae_uvmaps_in_place(filepath)
-    return import_dae_or_fbx(context, is_dae=True, filepath=filepath, discard_types=discard_types)
+    return import_dae_or_fbx(context, is_dae=True, filepath=filepath, discard_types=discard_types, apply_transforms=apply_transforms)
 
-def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = ('EMPTY')):
+def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types=('EMPTY'), apply_transforms=True):
     # Both of these functions take a "filepath" property, 
     # and both load the contents to the active collection and select all objects.
     import_func = bpy.ops.wm.collada_import if is_dae else bpy.ops.import_scene.fbx
@@ -579,10 +635,17 @@ def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types = (
     if context.active_object:
         bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.select_all(action='DESELECT')
-    # Can't seem to suppress prints on collada, hmm.
+
+    # I've tried a million ways to suppress the .dae importer prints but it can't be done without a PR to Blender.
+    # (Or by Popen()ing another blender instance to import and then appending from that, which would be too silly.)
     import_func(filepath=filepath)
+
+    # NOTE: The transform values of some objects are not their actual transforms. (probably some .dae importer bug)
+    # They just need to be nudged so they snap to their actual transform values (which do seem to import correctly).
+    # But this VERY IMPORTANT to be done before Apply Transforms!!!
     bpy.ops.transform.translate()
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    if apply_transforms:
+        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     for ob in context.selected_objects[:]:
         if ob.type in discard_types:
             bpy.data.objects.remove(ob)
@@ -1524,7 +1587,9 @@ def ensure_nodetree(nodetree_name) -> bpy.types.NodeTree:
         return existing_nt
 
     # Import NodeTree from resources.blend file.
-    with bpy.data.libraries.load(abs_path, link=True, relative=True) as (
+    prefs = get_addon_prefs()
+    link = prefs.resource_append_mode=='LINK'
+    with bpy.data.libraries.load(abs_path, link=link, relative=True) as (
         data_from,
         data_to,
     ):

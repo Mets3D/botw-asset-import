@@ -1,6 +1,7 @@
 import bpy, os, re, json, zipfile, io
+from bpy.props import BoolProperty, StringProperty
 from collections import OrderedDict
-from math import pi
+from math import pi, radians
 from pathlib import Path
 import pickle
 from multiprocessing import shared_memory
@@ -44,7 +45,6 @@ CACHE_tex_info = {}
 CACHE_shader_data = {}
 CACHE_image_paths = {}
 
-
 def read_shared_dict(shm_name="my_shared_dict"):
     """Reads a dictionary from shared memory and deserializes it."""
     shm = shared_memory.SharedMemory(name=shm_name)  # Attach to shared memory
@@ -79,7 +79,6 @@ def ensure_caches(force=False, shared_mem_name=""):
         with open(TEXTURE_INFO_JSON, "r", encoding="utf-8") as f:
             CACHE_tex_info = json.load(f)
 
-    global CACHE_image_paths    # a few kb
     if not CACHE_image_paths or force:
         cache_ensure_image_paths()
 
@@ -87,7 +86,6 @@ def ensure_caches(force=False, shared_mem_name=""):
         cache_ensure_shader_data()
 
     return {'material_defaults':CACHE_mat_defaults, 'tex_info': CACHE_tex_info, 'image_paths': CACHE_image_paths, 'shader_data': CACHE_shader_data}
-
 
 def cache_ensure_image_paths() -> dict[str, str]:
     """Create a mapping from image names to full filepaths in the Game Models folder."""
@@ -143,19 +141,27 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     bl_label = "Import BotW .dae + .fbx"
     bl_options = {'REGISTER', 'UNDO'}
 
-    directory: bpy.props.StringProperty(subtype='FILE_PATH', options={'SKIP_SAVE', 'HIDDEN'})
-    rename_known: bpy.props.BoolProperty(name="Rename Known Assets", description="If an object's name is found in the asset name map, rename it to that", default=True)
-    rename_unknown: bpy.props.BoolProperty(name="Rename Unknown Assets", description="If an object's name isn't found in the asset name map, rename it to title case and remove some prefixes", default=True)
-    create_parent_collections: bpy.props.BoolProperty(name="Create Parent Collections", description="When a directory has more than 1 file, create a parent collection that represents that directory", default=True)
+    directory: StringProperty(subtype='FILE_PATH', options={'SKIP_SAVE', 'HIDDEN'})
+    rename_known_assets: BoolProperty(name="Rename Known Assets", description="If an object's name is found in the asset name map, rename it to that", default=True)
+    rename_unknown_assets: BoolProperty(name="Rename Unknown Assets", description="If an object's name isn't found in the asset name map, rename it to title case and remove some prefixes", default=True)
+    create_parent_collections: BoolProperty(name="Create Parent Collections", description="When a directory has more than 1 file, create a parent collection that represents that directory", default=True)
 
-    force_update_caches: bpy.props.BoolProperty(default=False)
+    rename_prepend: BoolProperty(name="Prepend Asset to Object Names", description="Prepend asset name to object and material names. Useful when importing many assets into a single file to keep names unique, but can also result in exceeding the 63-character limit. Those cases will be skipped (not renamed)", default=True)
+    rename_clean_names: BoolProperty(name="Clean Object & Material Names", description="", default=True)
+
+    deduplicate_materials: BoolProperty(name="Deduplicate Materials", description="If two identicals end up identical, remap users on one of them.", default=True)
+
+    force_update_caches: BoolProperty(default=False)
 
     def draw(self, context):
         layout = self.layout
-        layout.prop(self, 'rename_known')
-        if self.rename_known:
-            layout.prop(self, 'rename_unknown')
+        layout.prop(self, 'rename_known_assets')
+        if self.rename_known_assets:
+            layout.prop(self, 'rename_unknown_assets')
+        layout.prop(self, 'rename_ob_mat_unique')
+        layout.prop(self, 'rename_ob_mat_clean')
         layout.prop(self, 'create_parent_collections')
+        layout.prop(self, 'deduplicate_materials')
 
     def execute(self, context):
         global PRINT_LATER
@@ -188,25 +194,25 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     parent_coll = ensure_collection(context, parent_coll_name)
             for dae_name in dae_files:
                 asset_name = dae_name.replace(".dae", "")
-                if self.rename_known:
-                    asset_name = derive_asset_name(dae_name, dirname, len(dae_files)==1, self.rename_unknown)
+                if self.rename_known_assets:
+                    asset_name = derive_asset_name(dae_name, dirname, len(dae_files)==1, self.rename_unknown_assets)
 
                 if 'Animation' in asset_name:
                     continue
                 full_path = os.path.join(root, dae_name)
                 with Timer("Full Import", dae_name):
-                    imported_objects += import_and_setup_single_dae(context, full_path, asset_name, parent_coll)
+                    imported_objects += import_and_setup_single_dae(context, full_path, asset_name, parent_coll, uniqify_names=self.rename_prepend, clean_names=self.rename_clean_names)
             counter += 1
 
         for lateprint in PRINT_LATER:
             print(lateprint)
 
-        deduplicate_materials(imported_objects)
+        if self.deduplicate_materials:
+            deduplicate_materials(imported_objects)
         bpy.ops.outliner.orphans_purge()
         refresh_images()
 
-        # Dump cache, otherwise it's easy to run out of RAM on subsequent imports.
-        # TODO: This might not be necessary now that we have texture_info.json. But keeping it also should do little harm.
+        # Dump cache, in case the garbage collector doesn't. (it should, but this makes extra sure.)
         PixelImage.cache = {}
         Timer.summarize()
 
@@ -330,21 +336,21 @@ def ensure_world_and_lights(context) -> bpy.types.World:
     world = bpy.data.worlds.get(WORLD_NAME)
     return world
 
-def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll=None) -> list[bpy.types.Object]:
-    filename = os.path.basename(full_path)
-    asset_name = asset_name or os.path.splitext(filename)[0]
+def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll=None, rename_coll=True, uniqify_names=False, clean_names=True) -> list[bpy.types.Object]:
+    dae_filename = os.path.basename(full_path)
+    asset_name = asset_name or os.path.splitext(dae_filename)[0]
     dirname = os.path.basename(os.path.dirname(full_path))
 
     prefs = get_addon_prefs()
 
     # Create the collection and set it as active so all the objects get imported there to begin with.
-    collection = ensure_collection(context, asset_name, parent=parent_coll)
+    noext_filename = dae_filename.replace(".dae", "")
+    coll_name = asset_name if rename_coll else noext_filename
+    collection = ensure_collection(context, coll_name, parent=parent_coll)
     collection.asset_mark()
     collection['dirname'] = dirname
     collection['asset_name'] = asset_name
-    collection['file_name'] = filename.replace(".dae", "")
-    if not prefs.rename_collections:
-        collection.name = collection['file_name']
+    collection['file_name'] = noext_filename
     set_active_collection(context, collection)
 
     with Timer("Import .dae + .fbx", asset_name):
@@ -359,68 +365,168 @@ def import_and_setup_single_dae(context, full_path, asset_name=None, parent_coll
     if prefs.game_icons_folder:
         override = context.copy()
         override["id"] = collection
-        icon_filepath = os.path.join(prefs.game_icons_folder, filename.replace(".dae", ""), filename.replace(".dae", ICON_EXTENSION))
+        icon_filepath = os.path.join(prefs.game_icons_folder, dae_filename.replace(".dae", ""), dae_filename.replace(".dae", ICON_EXTENSION))
         if os.path.exists(icon_filepath):
             with context.temp_override(**override):
                 bpy.ops.ed.lib_id_load_custom_preview(filepath=icon_filepath)
 
     ret_objs = []
     for obj in objs:
-        if obj.type == 'ARMATURE':
-            if obj.animation_data and obj.animation_data.action:
-                obj.animation_data.action = None
-            if len(obj.data.bones) < 2:
-                bpy.data.objects.remove(obj)
-                continue
-        elif obj.type == 'MESH':
-            orig_name = obj.name
-            obj['import_name'] = orig_name
-            if prefs.rename_objects:
-                if obj.name[-4] == ".":
-                    orig_name = obj.name[:-4]
-                if "_Mt_" in obj.name:
-                    split = obj.name.split("_Mt_")
-                    obj.name = asset_name + "_" + split[0]
-                    for primitive in PRIMITIVE_NAMES:
-                        if primitive in obj.name:
-                            obj.name = asset_name + "_" + split[1]
-                    if obj.name.endswith("_"):
-                        obj.name = obj.name[:-1]
-                else:
-                    print_later(f"Couldn't rename object: {obj.name}")
-                for primitive in PRIMITIVE_NAMES:
-                    if primitive in obj.name:
-                        obj.name = obj.name.split(primitive)[0]
-                if obj.name.endswith("_Root"):
-                    obj.name = obj.name[:-5]
+        cleaned = process_object(collection, obj, asset_name, uniqify_names, clean_names)
+        if cleaned:
+            ret_objs.append(cleaned)
 
-            if len(obj.vertex_groups) == 1 and 'Root' in obj.vertex_groups:
-                obj.vertex_groups.clear()
-
-            for mod in obj.modifiers:
-                if mod.type == 'ARMATURE' and not mod.object:
-                    obj.modifiers.remove(mod)
-
-            for mat in obj.data.materials:
-                json_mat_name = collection['file_name'] + "_" + mat['import_name'] + ".json"
-                mat['json_name'] = json_mat_name
-                mat_data = get_shader_data(mat)
-                if mat_data:
-                    # Store as string because Blender doesn't let us store 
-                    # an arbitrary structure of lists/dicts.
-                    mat['shader_data'] = json.dumps(mat_data)
-                else:
-                    print_later(f"Couldn't find material .json: {json_mat_name}")
-
-            cleanup_mesh(collection, obj, asset_name)
-
-            if any([s in obj.name for s in GARBAGE_MATS]):
-                obj.hide_viewport, obj.hide_render = True, True
-
-        obj.data.name = obj.name
-        ret_objs.append(obj)
+    hide_some_objects(collection, obj)
 
     return ret_objs
+
+def process_object(collection, obj, asset_name, uniqify_names=False, clean_names=True):
+    if obj.type == 'ARMATURE':
+        if obj.animation_data and obj.animation_data.action:
+            obj.animation_data.action = None
+        if len(obj.data.bones) < 2:
+            bpy.data.objects.remove(obj)
+            return
+    elif obj.type == 'MESH':
+        obj['import_name'] = obj.name
+        if clean_names:
+            rename_object(obj)
+
+        if uniqify_names:
+            new_name = asset_name + "_" + obj.name
+            if len(new_name) < 64:
+                obj.name = new_name
+            else:
+                # This will happen often if `rename_unknown_assets==False` but `rename_ob_mat_unique==True`.
+                # That's just not a recommended combination of settings.
+                print_later("Couldn't rename due to 63-char limit: ", obj.name, new_name)
+
+        if len(obj.vertex_groups) == 1 and 'Root' in obj.vertex_groups:
+            obj.vertex_groups.clear()
+
+        for mod in obj.modifiers:
+            if mod.type == 'ARMATURE' and not mod.object:
+                obj.modifiers.remove(mod)
+
+        for uv_layer, name in zip(obj.data.uv_layers, ("Albedo", "SPM")):
+            # NOTE: I shouldn't have force-named the UV maps by their "purpose" since it often isn't accurate. But it's kinda too late to fix now. Sorry!
+            # NOTE: Sometiems there's also a 3rd UV layer.
+            # TODO: Might need a check here to see if all coordinates are at (0,0) and remove if so.
+            uv_layer.name = name
+
+        for mat in obj.data.materials:
+            json_mat_name = collection['dirname'] + "_" + collection['file_name'] + "_" + mat['import_name'] + ".json"
+            mat['json_name'] = json_mat_name
+            mat_data = get_shader_data(mat)
+            if mat_data:
+                # Store as string because Blender doesn't let us store 
+                # an arbitrary structure of lists/dicts.
+                mat['shader_data'] = json.dumps(mat_data)
+            else:
+                print_later(f"Couldn't find material .json: {json_mat_name}")
+
+            new_name = mat.name
+            if "Mt_" in mat.name and clean_names:
+                new_name = mat.name.split("Mt_")[1]
+
+            if uniqify_names:
+                new_name = asset_name + ": " + new_name
+
+            if new_name != mat.name and new_name in bpy.data.materials:
+                # If the material with this name already exists, overwrite it.
+                # Since material names are unique, this should only happen when trying 
+                # to delete and re-import an asset, and forgetting to purge.
+                existing_mat = bpy.data.materials.get(new_name)
+                existing_mat.user_remap(mat)
+                bpy.data.materials.remove(existing_mat)
+            else:
+                mat.name = new_name
+
+            with Timer("Setup material", mat.name):
+                process_material(collection, obj, mat)
+                set_object_color(obj)
+
+    obj.data.name = obj.name
+    return obj
+
+def rename_object(obj):
+    new_name = obj.name
+    if "_Mt_" in new_name:
+        new_name = new_name.split("_Mt_")[0]
+
+    new_name = tidy_name(new_name)
+    if len(new_name) < 64:
+        obj.name = new_name
+    else:
+        # This should never happen because we don't make names longer here.
+        print_later("Couldn't rename due to 63-char limit: ", obj.name, new_name)
+
+def tidy_name(name):
+    trash = PRIMITIVE_NAMES + ["_Model", "_Root", "_lowpoly", "_low", "__abc", "_Mdl"]
+    swap = {
+        "  " : " ",
+        "D L C" : "DLC"
+    }
+
+    new_name = name
+
+    for primitive in PRIMITIVE_NAMES:
+        if primitive in new_name:
+            new_name = new_name.split(primitive)[0]
+
+    # Nuke certain strings
+    for word in trash:
+        new_name = new_name.replace(word, "")
+
+    # Find and replace as per the `swap` dict
+    for find, replace in swap.items():
+        if find in new_name:
+            new_name = new_name.replace(find, replace)
+
+    # Remove _001
+    suffix_pattern = re.compile(r"\_\d{3}$")
+    if suffix_pattern.search(new_name):
+        new_name = suffix_pattern.sub("", new_name)
+
+    # Remove .001
+    suffix_pattern = re.compile(r"\.\d{3}$")
+    if suffix_pattern.search(new_name):
+        new_name = suffix_pattern.sub("", new_name)
+
+    # Remove _group###
+    suffix_pattern = re.compile(r"_group\d*$")
+    if suffix_pattern.search(new_name):
+        new_name = suffix_pattern.sub("", new_name)
+
+    if "_MT_" in new_name:
+        new_name = new_name.split("_MT_")[1]
+
+    if new_name.endswith("_"):
+        new_name = new_name[:-1]
+
+    # Remove numbers from end unless preceeded by a symbol (usually . or _)
+    suffix_pattern = re.compile(r"(?<=[A-Za-z])\d+$")
+    if suffix_pattern.search(new_name):
+        new_name = suffix_pattern.sub("", new_name)
+
+    return new_name
+
+def hide_some_objects(collection, obj):
+    """Hide specific troublesome objects."""
+    hide = False
+    if any([s in obj.name for s in GARBAGE_MATS]):
+        # Certain materials aren't visible in-game.
+        hide = True
+    objs_to_hide = [
+        # These tree leaf meshes z-fight with the snowy leaves and aren't necessary.
+        ('Obj_TreeConiferous_A_Snow_01', 'A21__Mt_Treeleaf_01'),
+        ('Obj_TreeConiferous_A_Snow_02', 'A1__Mt_Treeleaf_01'),
+        ('Obj_TreeConiferous_A_Snow_03', 'A10__Mt_Treeleaf_01'),
+    ]
+    if any([collection['file_name'] == filename and obj['import_name'] == obname for filename, obname in objs_to_hide]):
+        hide = True
+
+    obj.hide_viewport, obj.hide_render = hide, hide
 
 def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, asset_name):
     """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
@@ -541,52 +647,10 @@ def cleanup_fbx_armature(context, fbx_arm):
             else:
                 pb.custom_shape_rotation_euler.z = -pi
 
-def get_textures_used_by_dae(filepath) -> dict[str, list[str]]:
-    content = ""
-    with open(filepath, "r", encoding="utf-8") as file:
-        content = file.read()
-
-    if not content:
-        return {}
-
-    mat_pattern = re.finditer(r'<effect id="Effect_(.*?)">.*?</effect>', content, re.DOTALL)
-
-    image_map = {}
-
-    for mat in mat_pattern:
-        mat_name = mat.group(1)
-        mat_content = mat.group(0)
-
-        images = re.findall(r'<init_from>(.*?)</init_from>', mat_content)
-
-        image_map[mat_name] = images
-
-    return image_map
-
-def cleanup_mesh(collection, obj, asset_name):
-    assert obj.type == 'MESH'
-    for uv_layer, name in zip(obj.data.uv_layers, ("Albedo", "SPM")):
-        # TODO: Might need a check here to see if all coordinates are at (0,0) and remove if so.
-        uv_layer.name = name
-    for mat in obj.data.materials:
-        if 'Mt_' in mat.name:
-            new_mat_name = asset_name + ": " + mat.name.split("Mt_")[1]
-            if new_mat_name in bpy.data.materials:
-                new_mat = bpy.data.materials.get(new_mat_name)
-
-                mat.user_remap(new_mat)
-                mat = new_mat
-                continue
-            else:
-                mat.name = new_mat_name
-
-        with Timer("Setup material", mat.name):
-            setup_material(collection, obj, mat)
-            set_object_color(obj)
-
-def setup_material(collection, obj, material):
-    """A giant function that tries to set up complete materials based on nothing but the single
-    Albedo texture that (usually) gets imported with the .fbx, relying entirely on naming conventions and hardcoding."""
+def process_material(collection, obj, material):
+    """My best effort at setting up materials based on data exported from my custom 
+    Switch Toolbox, and included in this add-on inside materials.zip.
+    """
 
     if any([s in material.name for s in GARBAGE_MATS]):
         # This is some sorta gameengine mesh, we don't care.
@@ -620,7 +684,7 @@ def setup_material(collection, obj, material):
         hookup_rgb_nodes(material, shader_node)
 
     set_shader_socket_values(collection, obj, material, shader_node, spm_has_green)
-    fix_material_settings(material)
+    fix_material_viewport_display(material)
     material['hash'] = hash_material(material)
 
 def load_assigned_textures(material) -> OrderedDict[bpy.types.Image, str]:
@@ -908,7 +972,7 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
         material['WARNING'] = "Using material blend shader because there is a vertex color and >1 albedos."
 
     def order_texture_list(imgs: list[bpy.types.Image]) -> list[bpy.types.Image]:
-        order = ["Alb", "Msk", "AO", "Spm", "Msk", "Nrm", "Emm", "Fx"]
+        order = ["Alb", "Msk", "AO", "Spm", "Nrm", "Emm", "Fx"]
         return sorted(imgs,
             key=lambda img: 
             [
@@ -1487,7 +1551,7 @@ def refresh_images():
             if n.type == 'TEX_IMAGE':
                 n.image = n.image
 
-def fix_material_settings(mat):
+def fix_material_viewport_display(mat):
     if mat.library:
         return
     mat.metallic = 0

@@ -5,7 +5,7 @@ from mathutils import Matrix, Vector, Euler
 from math import pi
 
 from .asset_thumbnail_render import crop_asset_preview
-from .botw_batch_asset_import import PRIMITIVE_NAMES, GARBAGE_MATS, fix_material_settings, get_albedo_img_node, set_object_color, ensure_nodetree, cleanup_fbx_armature
+from .botw_batch_asset_import import PRIMITIVE_NAMES, GARBAGE_MATS, fix_material_viewport_display, get_albedo_img_node, set_object_color, ensure_nodetree, cleanup_fbx_armature
 from ..databases.asset_names import asset_names
 
 from ..utils.collections import find_layer_collection_by_collection
@@ -20,23 +20,18 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
     bl_label = "BotW: Cleanup"
     bl_options = {'REGISTER', 'UNDO'}
 
-    apply_transforms: BoolProperty(name="Apply Transforms")
-
-    cleanup_armatures: BoolProperty(name="Cleanup Armatures", description="Ensure root bones with correct orientation, assign bone shapes, unassign actions, reset bone transforms.")
     link_bone_widgets: BoolProperty(name="Link Bone Widgets")
     remove_single_bones: BoolProperty(name="Remove 1-Bone Armatures")
 
     clean_animations: BoolProperty(name="Clean Animations")
 
     organize_by_catalogs: BoolProperty(name="Organize Scene By Asset Catalogs")
-    crop_asset_previews: BoolProperty(name="Crop Transparent Asset Previews")
 
-    fix_material_viewport: BoolProperty(name="Fix Viewport Materials")
     deduplicate_images: BoolProperty(name="Deduplicate Images")
 
     report_issues: BoolProperty(name="Report Issues", description="Report issues that may need manual checking. This is always safe to enable.", default=True)
     reveal_asset_collections: BoolProperty(name="Ensure Visible Asset Collections", default=True)
-    
+
     rename_ids: BoolProperty(name="Rename IDs", description="Remove garbage strings from names of objects, collections, materials. Changes will be printed to terminal.")
     rename_actions: BoolProperty(name="Rename Actions", description="Rename Actions to have better names. Changes will be printed to terminal.")
     rename_materials: BoolProperty(name="Rename Materials", description="Rename materials to the name of their albedo texture if available.")
@@ -52,24 +47,16 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
             panel.prop(self, 'report_issues')
             panel.prop(self, 'reveal_asset_collections')
             panel.prop(self, 'link_bone_widgets')
-            panel.prop(self, 'cleanup_armatures')
             panel.prop(self, 'organize_by_catalogs')
-
-        header, panel = layout.panel(idname="Cleanup (Expensive)")
-        header.label(text="Expensive")
-        if panel:
-            panel.prop(self, 'deduplicate_images')
-            panel.prop(self, 'crop_asset_previews')
-            panel.prop(self, 'fix_material_viewport')
-            panel.prop(self, 'clean_animations')
 
         header, panel = layout.panel(idname="Cleanup (Destructive")
         header.label(text="Destructive")
         if panel:
-            panel.prop(self, 'apply_transforms')
+            panel.prop(self, 'deduplicate_images')
+            panel.prop(self, 'clean_animations')
             panel.prop(self, 'remove_single_bones')
 
-        header, panel = layout.panel(idname="Cleanup (The Rest)")
+        header, panel = layout.panel(idname="Cleanup (Rename)")
         header.label(text="Rename")
         if panel:
             panel.prop(self, 'rename_ids')
@@ -77,14 +64,6 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
             panel.prop(self, 'rename_materials')
 
     def execute(self, context):
-        if self.apply_transforms or self.cleanup_armatures:
-            reveal_all_collections(context)
-
-        if self.apply_transforms:
-            apply_transforms(context)
-            context.view_layer.update()
-        if self.cleanup_armatures:
-            cleanup_armatures(context)
         if self.link_bone_widgets:
             link_bone_widgets()
         if self.clean_animations:
@@ -103,11 +82,6 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
             asset_catalogs_to_scene_collection(context)
         if self.rename_actions:
             rename_actions()
-        if self.crop_asset_previews:
-            print("Cropping Asset Previews...")
-            crop_asset_previews()
-        if self.fix_material_viewport:
-            fix_materials_settings()
         if self.deduplicate_images:
             print("Deduplicating textures...")
             deduplicate_textures()
@@ -127,14 +101,8 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
                 if coll.asset_data:
                     coll.hide_viewport = coll.hide_render = False
 
-        ensure_UV_fallback()
         remove_custom_props()
-        hide_garbage_mats()
         ensure_lighting()
-        deduplicate_UV_nodes()
-        remove_dead_modifiers()
-        rename_controlled_bones()
-        fix_transparency()
 
         if self.rename_ids:
             rename_ids()
@@ -144,21 +112,6 @@ class OBJECT_OT_botw_cleanup(bpy.types.Operator):
         self.report({'INFO'}, "Cleanup complete.")
         return {'FINISHED'}
 
-def fix_transparency():
-    for mat in bpy.data.materials:
-        if not mat.use_nodes:
-            continue
-        nodes = mat.node_tree.nodes
-        shader_node = next((n for n in nodes if n.type=='GROUP'), None)
-        if not shader_node:
-            continue
-        alpha_socket = shader_node.inputs.get("Alpha")
-        if not alpha_socket:
-            continue
-        if len(alpha_socket.links) == 0 and mat.surface_render_method=='BLENDED':
-            mat.surface_render_method = 'DITHERED'
-            mat.use_transparency_overlap = False
-            print("Fix transparency overlap: ", mat.name)
 
 def rename_materials_to_albedo():
     for mat in bpy.data.materials:
@@ -185,27 +138,8 @@ def report_local_nodegroups():
         if not ng.library:
             print("Local nodegroup: ", ng.name)
 
-def remove_dead_modifiers():
-    for obj in bpy.data.objects:
-        if obj.type != 'MESH':
-            continue
-        for mod in obj.modifiers[:]:
-            if mod.type == 'ARMATURE' and not mod.object:
-                obj.modifiers.remove(mod)
-
-def crop_asset_previews():
-    for container in (bpy.data.collections, bpy.data.actions):
-        for asset in container:
-            if not asset.asset_data:
-                continue
-            if not asset.library and not asset.override_library and asset.asset_data and asset.preview:
-                orig_size = asset.preview.image_size[0]
-                success = crop_asset_preview(asset)
-                new_size = asset.preview.image_size[0]
-                if success:
-                    print("Cropped:", asset.name, orig_size, new_size)
-
 def rename_actions():
+    # TODO: This should move to the batch .seanim import operator.
     REMOVE = ["Default_", "Demo_", "Act_", "Normal_", "Common_", "Gd_General_", "GdQueen_", "Npc_TripMaster_", "Npc_Hylia_Johnny_", "Npc_Escort_", "Npc_King_Vagrant_", "UC_M_", "Npc_Shiekah_Heir_", "Npc_Shiekah_Artist_", "AncientDoctor_Hateno_", "Npc_Rito_Teba_", "Minister_", "UR_M_", "Move_", "Test_"]
 
     SWAPS = {
@@ -242,6 +176,7 @@ def report_libraries():
             print("Suspicious library: ", lib.filepath)
 
 def rename_ids():
+    # TODO: Move this logic to the import operator.
     trash = PRIMITIVE_NAMES + ["_Model", "_Root", "_lowpoly", "_low", "__abc", "_Mdl"]
     swap = {
         "  " : " ",
@@ -315,14 +250,8 @@ def ensure_lighting():
     sphere.data.color = [1.000000, 0.210270, 0.087245]
     sphere.location = (0, -1, 1)
 
-def hide_garbage_mats():
-    for garb in GARBAGE_MATS:
-        for obj in bpy.data.objects:
-            if garb in obj.name:
-                obj.hide_viewport = obj.hide_render = True
-                obj.data.materials.clear()
-
 def remove_custom_props():
+    # TODO: Move this to the import operator.
     bad_props = ['cloudrig', 'cloudrig_prefs', 'cycles', 'cloudrig_component', 'existing_img']
     for obj in bpy.data.objects:
         things = [obj]
@@ -334,36 +263,6 @@ def remove_custom_props():
                     del thing[bad_prop]
     for prop in list(bpy.context.scene.keys()):
         del bpy.context.scene[prop]
-
-def reveal_all_collections(context):
-    for c in bpy.data.collections:
-        c.hide_viewport = False
-        layer_coll = find_layer_collection_by_collection(context.view_layer.layer_collection, c)
-        if layer_coll:
-            layer_coll.hide_viewport = False
-
-    bpy.ops.object.hide_view_clear()
-    bpy.ops.object.select_all(action='SELECT')
-
-def apply_transforms(context):
-    for o in bpy.data.objects:
-        if o not in set(context.scene.collection.all_objects):
-            continue
-        if o.type not in ('MESH', 'ARMATURE'):
-            o.select_set(False)
-            continue
-        if o.matrix_world == Matrix.Identity((4)):
-            o.select_set(False)
-            continue
-        o.select_set(True)
-    bpy.ops.object.transform_apply()
-
-def cleanup_armatures(context):
-    print("Ensure root bones")
-    for o in bpy.data.objects:
-        if o.type != 'ARMATURE':
-            continue
-        cleanup_fbx_armature(context, o)
 
 def link_bone_widgets():
     blend_path = bpy.data.filepath
@@ -399,14 +298,6 @@ def report_useless_armatures(remove=False):
                 bpy.data.objects.remove(obj)
             else:
                 print("Single bone armature: ", obj.name)
-
-def rename_controlled_bones():
-    for obj in bpy.data.objects:
-        if obj.library or obj.override_library or obj.type != 'ARMATURE':
-            continue
-        for pb in obj.pose.bones:
-            if "_Controled" in pb.name:
-                pb.name = pb.name.replace("_Controled", "")
 
 def report_empty_image_nodes():
     for m in bpy.data.materials:
@@ -449,18 +340,6 @@ def report_bad_colorspace():
             if img.colorspace_settings.name != 'Non-Color':
                 print("Should be non-color?", img.name, img.colorspace_settings.name)
 
-def fix_materials_settings():
-    for i, m in enumerate(bpy.data.materials):
-        print(f"({i}/{len(bpy.data.materials)}) Fix material settings: {m.name}")
-        fix_material_settings(m)
-        # Nuke the pixel cache so we don't run out of memory
-        albedo_node = get_albedo_img_node(m)
-        if albedo_node and albedo_node.image:
-            pixel_image = PixelImage.from_blender_image(albedo_node.image)
-            pixel_image.pixels_rgba = []
-    for o in bpy.data.objects:
-        set_object_color(o)
-
 def hash_image_pixels(image) -> str:
     pixel_image = PixelImage.from_blender_image(image)
     img_hash = hashlib.md5(str(pixel_image.pixels_rgba).encode("utf-8")).hexdigest()
@@ -488,55 +367,5 @@ def deduplicate_textures():
 
     for img_hash, count in copy_counter.items():
         print(f"Image {img_hashes[img_hash].name} had {count} duplicates.")
-
-def ensure_UV_fallback():
-    for obj in bpy.data.objects:
-        if obj.library or obj.override_library or obj.type != 'MESH':
-            continue
-        uv_layers = obj.data.uv_layers
-        for slot in obj.material_slots:
-            material = slot.material
-            if not material or not material.use_nodes:
-                continue
-            nodes = material.node_tree.nodes
-            for node in nodes:
-                if node.type == 'UVMAP' and node.uv_map:
-                    if node.uv_map not in uv_layers:
-                        for link in node.outputs[0].links:
-                            if link.to_node.type == 'GROUP':
-                                pass
-                            else:
-                                fallback_node = nodes.get("UV Fallback")
-                                if not fallback_node:
-                                    print("Creating UV Fallback node: ", material.name)
-                                    fallback_node = nodes.new(type="ShaderNodeGroup")
-                                    fallback_nt = ensure_nodetree("BotW: UV Fallback")
-                                    fallback_node.node_tree = fallback_nt
-                                    fallback_node.location = node.location
-                                    node.location += Vector((-200, 0))
-                                    fallback_node.name = "UV Fallback"
-                                    material.node_tree.links.new(node.outputs[0], fallback_node.inputs[0])
-                                material.node_tree.links.new(fallback_node.outputs[0], link.to_socket)
-
-def deduplicate_UV_nodes():
-    for mat in bpy.data.materials:
-        if not mat.use_nodes:
-            continue
-        uv_nodes = {}
-        nodes_to_delete = []
-        for node in mat.node_tree.nodes:
-            if node.type == 'UVMAP':
-                if node.uv_map not in uv_nodes:
-                    uv_nodes[node.uv_map] = node
-                else:
-                    other_node = uv_nodes[node.uv_map]
-                    for link in node.outputs[0].links:
-                        mat.node_tree.links.new(other_node.outputs[0], link.to_socket)
-                    nodes_to_delete.append(node)
-
-        if nodes_to_delete:
-            print(f"Deleting {len(nodes_to_delete)} unnecessary UVMap nodes on {mat.name}")
-            for node in nodes_to_delete:
-                mat.node_tree.nodes.remove(node)
 
 registry = [OBJECT_OT_botw_cleanup]

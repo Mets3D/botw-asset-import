@@ -1,81 +1,51 @@
+Import issues:
+    - Materials with dyes won't have the image nodes spaced correctly, again.
 
-TODO:
-    - Could optimize the importer by storing average texture colors in a json.
+    - Wrong UVMap assigned
+        Obj_TreeStump_Broadleaf_A_01
+        Obj_TreeStump_Coniferous_A_01
+        Obj_TreeStump_Moss_A_01
 
-    Material Analysis:
-        - uking_enable_wind_vtx_transform definitely defines whether a material is affected by wind. Huge win!!
-            - Welp... This is now catching tree trunk materials as well.
-                - The tree trunk has lumberjack properties like uking_enable_lumberjack_trunk==1
-                - It also does not have uking_wind_vtx_transform_intensity, which the leaves have, with a value of 0.025! This is probably what we really need!
-            - And tree leaves need their custom normals to be removed.
-            - Tree leaves also have uking_enable_transmission==1
-            - Leaves also seem to be UVMapped such that the part that's touching the branches is at 0 Y. So we might want to mask the displacement by the UV Y value.
+    - Things that don't get their albedo hooked up
+        Obj_Plant_HopBush_D_01
+        Obj_Plant_Juniperus_A_Red
+            And the UV nodes are also a mess because of pingpong+UV fallback not combining properly. I thought I had code for that!
+        Obj_Plant_Juniperus_B_Red
+        Obj_Plant_Juniperus_C_Red
 
-        - uking_enable_backface_modify might mean that a material should be double-sided.
-        - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece.
+    - There were also some tree ring materials that have a 2nd UVMap but shouldn't be using it
 
-        - What samplers are included in a material could be of value:
-            "shaderassign.samplers._a0": "_a0",
-            "shaderassign.samplers._a1": "_a1",
-            "shaderassign.samplers._e0": "_e0",
-            "shaderassign.samplers._n0": "_n0",
-            "shaderassign.samplers._s0": "_s0",
-            "shaderassign.samplers._t0": "_t0",
-            "shaderassign.samplers._v0": "_v0",
-            "shaderassign.samplers.array0": "tma",
-            "shaderassign.samplers.array1": "tmc",
-            "shaderassign.samplers.grass_color": "grass_color",
-            "shaderassign.samplers.grass_lie": "grass_lie",
-            "shaderassign.samplers.grass_mow": "grass_mow",
-            "shaderassign.samplers.grass_mow_wide": "grass_mow_wide",
-            "shaderassign.samplers.grass_summary0": "grass_summary0",
-            "shaderassign.samplers.grass_summary1": "grass_summary1",
-            "shaderassign.samplers.grass_wind_swell": "grass_wind_swell",
-            "shaderassign.samplers.lumberjack_thickness": "_gn0",
-            "shaderassign.samplers.tera_height": "tera_height",
-            "shaderassign.samplers.tera_material": "tera_material",
-            "shaderassign.samplers.tera_material_linear": "tera_material_linear",
-            "shaderassign.samplers.tera_normal": "tera_normal",
-            "shaderassign.samplers.tera_route_curve": "tera_curve",
-            "shaderassign.samplers.tera_route_refer": "tera_refer",
-            "shaderassign.samplers.tera_water": "tera_water",
-            "shaderassign.samplers.uking_tex0": "sampler0",
-            "shaderassign.samplers.uking_tex1": "sampler0",
+Importer feature ideas:
+    - See if we can figure out flow direction and speed of water and lava
+        - Even if not, at least load a water shader whenever TerraWater albedo is used. Similar idea for lava probably.
 
-        - See if we can figure out flow direction and speed of water and lava
-        - Figure out how we can tell if a material is a leaf/grass/etc that should be affected by wind, then write code that assigns the Fauna shader, sets the displacement mode, and connects the displacement.
-            - Additionally, if we could also figure out if a material is double-sided or not, that would be great.
+    - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece. Could be fun to store and add related functionality to the BlankFile.blend scripts.
 
+Map Importer TODOs:
+    - Organize Far objects, Enemies, NPCs, Animals into separate collections so they can be disabled easily.
 
-    Might have to tweak all the fauna stuff, or just the file or idk: https://projects.blender.org/blender/blender/issues/136453#issuecomment-1529450
-        - On every material that uses the Smooth Shade shader, set the displacement mode to Displacement+Bump
-        - Connect the new Displacement output of the Smooth Shade shader to the material output.
+    Terrain
+        - I'm not sure if I can trust bmubin's map_data that was generated because the file names don't align with the game's files. For example, 5100000001 doesn't exist in the game files, only bmubin afaict.
+        - Ice-spear's terrain visualization looks pretty good, although I didn't compare it to in-game. But looking at its source code could be useful.
+
+Asset pack release:
+    - Need to re-do Obj_Objects because a bunch of objects have no textures assigned for some reason.
+    - Need to re-do Obj_Fauna to fix transparency and add wind.
+
     Make a video showing off the whole asset library with the help of the convenience scripts in BlankFile.
         Remember to start off with factory settings or at least auto-run py scripts disabled, so I can show off the pop-up.
         Also show off SculptableTerrain.blend, maybe as a separate video.
+            Could change the Blender image names of the terrain materials based on bmubin/linked_resources/json/terrainmat_names.json.
+                But since we already zipped and uploaded, that has to be re-done. not worth.
 
-    Could change the Blender image names of the terrain materials based on bmubin/linked_resources/json/terrainmat_names.json.
-        But since we already zipped and uploaded, that has to be re-done. not worth.
-    Could add per-object and/or per-material shading controls (expose more sockets or add more Attribute nodes or both) for the rimlights especially.
-    It looks like I lost Akkala Tech Lab and Hateno Tech Lab in Town_P1, wtf. But meh, should get them from bmubin importer anyways... :/
+Should update the Kena and Witcher 3 asset libraries as well, if they even need to be updated, but probably yes. 
+    For example, I don't think I marked Kena animations as assets, but might as well.
+    Could also generate new thumbnails for them maybe, although I think these libraries used Cycles, so maybe not.
+    Should definitely inlude BlankFile.blend (although maybe with a better name)
 
-    Add-on:
-        - Thumbnail operator should also set output to PNG RGBA and film to transparent.
-        - Should tidy up the root folder, maybe move operators to their own folder, or the whole shebang to an src folder. But that would break the ability to install from zip. Does that even work?
-
-    Should update the Kena and Witcher 3 asset libraries as well, if they even need to be updated, but probably yes. 
-        For example, I don't think I marked Kena animations as assets, but might as well.
-        Could also generate new thumbnails for them maybe, although I think these libraries used Cycles, so maybe not.
-        Should definitely inlude BlankFile.blend (although maybe with a better name)
-
-    Separate uploads:
-        Linkle
-        Zelda
-        Mipha
-        Girly animations?
-        Nude Link
-
-Map Importer TODO:
-    - Organize Enemies, NPcs, Animals into separate collections so they can be disabled easily.
-    - I'm not sure if I can trust bmubin's map_data that was generated because the file names don't align with the game's files. For example, 5100000001 doesn't exist in the game files, only bmubin afaict.
-    - Could look at ice-spear's results at loading the terrain, maybe it's gud.
+Future projects:
+    Linkle
+    Zelda
+    Mipha
+    Girly animations?
+    Nude Link

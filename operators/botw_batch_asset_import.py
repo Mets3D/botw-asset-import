@@ -32,6 +32,61 @@ PRIMITIVE_NAMES = ["_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone",
 GARBAGE_MATS = ["InsideArea", "InsideMat"]
 TEX_SUFFIXES = ["_Alb", "_Spm", "_Nrm", "_Emm", "_Emm", "_Clr", "_Mtl"]
 
+# I really wanted to make wind work, but it's impossible to get perfect results from 
+# just the material data because it's all inconsistent nonsense.
+# So, I just hardcoded some stuff.
+LEAF_WIND_UV_ROTATIONS = {
+    'PlantTreeTropicalLeaf_A_Alb' : 90,
+    'Leaf_TreeWillow_A_02_Alb' : 90,
+    'Leaf_TreeWillow_A_01_Alb' : 180,
+    'Plant_PalmJungle_A_Leaf_01_Alb': -90,
+    'Plant_TreeBananaMiniLeaf_S_A_Alb' : -90,
+    'Plant_TreeBananaLeaf_S_A_Alb' : -90,
+    'PlantPalmBeach_A_Leaf_Alb' : -90,
+    'TreeLeafPalmMini_A_Alb' : -90,
+    'Plant_PalmMini_B_Alb': 180,
+    'Plant_Palm_A_Leaf_01_Alb' : -90,
+
+    # No rotation, but materials using these textures sometimes don't get detected as wind-blown materials, which is wrong.
+    'Plant_TreeLeaf_B_Alb' : 0,
+    'Plant_TreeBroadleaf_A_Alb' : 0,
+    'Plant_TreeBroadleaf_B_Alb' : 0,
+    'Plant_TreeBroadleaf_C_Alb' : 0,
+    'TreeCherry_Leaf01_Alb' : 0,
+    'TreeCherry_Leaf02_Alb' : 0,
+    'Plant_TreeConiferousLow_Leaf_Alb' : 0,
+    'Tree_TreeConiferousLeaf_A_Alb' : 0,
+    'Tree_TreeConiferousLeaf_B_Alb' : 0,
+    'Tree_TreeConiferousLeaf_C_Alb' : 0,
+    'Plant_TreePine_Leaf_A_Alb' : 0,
+    'Plant_TreePine_Leaf_B_Alb' : 0,
+    'Plant_TreeZoraLow_A_Branch_Alb' : 0,
+    'Plant_TreeZoraLow_B_Branch_Alb' : 0,
+
+    'Cloth_GerudoMayerBedRoom_I_Alb' : 0,
+    'Cloth_GerudoMayerBedRoom_K_Alb' : 0,
+}
+WIND_FORCE_USE_HEIGHT = [
+    'Plant_ChiliPepper_A_01_Alb',
+    'Plant_MelonAGrass_A_01_Alb',
+    'PlantPumpkinGrass_A_Alb',
+    'Obj_Plant_Juniperus_Snow_Alb',
+    'Plant_LotusLeaf_A_Alb',
+    'Obj_Plant_Weed_A_Alb',
+    'Obj_Plant_Weed_B_Alb',
+    'Obj_Plant_Weed_C_Alb',
+    'Plant_Weed_A_Alb',
+    'Plant_Weed_B_Alb',
+    'CmnTex_Plant_Tropical_A_Alb',
+    'CmnTex_Plant_Tropical_B_Alb',
+]
+WIND_FORCE_NOWIND = [
+    'CmnTex_Plant_KorokWood_A_01_Alb',
+    'Plant_KorokColor_Chg_0_Alb',
+    'Plant_Korok_Chg_0_Alb',
+    'Plant_LightGrass_A_Alb',
+]
+
 METAL_ROUGHNESS = 0.6
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
@@ -1017,21 +1072,43 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
     if 'tile_textures' in material:
         shader_name = "BotW: Material Blend"
 
-    wind_enabled = get_shader_property(material, "shaderassign.options.uking_enable_wind_vtx_transform")
-    wind_intensity = get_shader_property(material, "matparam.uking_wind_vtx_transform_intensity.ValueFloat", index=0)
+    # uking_wind_vtx_transform_channel
+    # shaderassign.options.uking_enable_wind_vtx_transform_coreinfo
+    # shaderassign.options.uking_enable_wind_vtx_transform_normal_lock
+
+    wind_enable = get_shader_property(material, "shaderassign.options.uking_enable_wind_vtx_transform")
+    wind_enable_lie = get_shader_property(material, "shaderassign.options.uking_enable_wind_vtx_transform_lie")
+    wind_enable_height = get_shader_property(material, "shaderassign.options.uking_enable_wind_vtx_transform_height")
+
+    wind_int = get_shader_property(material, "matparam.uking_wind_vtx_transform_intensity.ValueFloat", index=0)
+    wind_lie_int = get_shader_property(material, "matparam.uking_wind_vtx_transform_lie_intensity.ValueFloat", index=0)
+    wind_height_int = get_shader_property(material, "matparam.uking_wind_vtx_transform_lie_height.ValueFloat", index=0)
+
     is_a_tree = get_shader_property(material, "shaderassign.options.uking_enable_lumberjack") == 1
-    if (
-        wind_enabled == 1 and
-        wind_intensity not in(0.1, None) and   # For some reason 0.1 is the default value, and it's assigned to a lot of things that should not be affected by wind... Is it assigned to anything that SHOULD be affected by wind? I'm not sure.
-        not is_a_tree
-    ):
+    uses_a_windy_albedo = albedo and (albedo.name in LEAF_WIND_UV_ROTATIONS or albedo.name in WIND_FORCE_USE_HEIGHT)
+    force_no_wind = albedo and albedo.name in WIND_FORCE_NOWIND
+    wind_enabled = (
+        (
+            (wind_enable_height and wind_height_int != 0.5) or
+            (wind_enable_lie and wind_lie_int != 3.0) or
+            (wind_enable and wind_int != 0.1) or
+            uses_a_windy_albedo
+        ) and
+        not is_a_tree and
+        not force_no_wind
+    )
+    if wind_enabled:
+        # NOTE: We store this property even if we don't think this material uses height-based wind, 
+        # since detection for that is unreliable, and if we were to manually enable that checkbox in 
+        # a material, we'll need this property to be present.
+        obj['wind_height'] = max([bboxpoint[2] for bboxpoint in obj.bound_box])
         shader_name = "BotW: Fauna"
         if 'custom_normal' in obj.data.attributes:
             # Disable custom normals without deleting them.
             # They tend to make the leaves look a lot worse in Blender.
             obj.data.attributes['custom_normal'].name = 'custom_normal_bkp'
         material.displacement_method = 'BOTH'
-    elif len(obj.data.color_attributes) > 0 and shader_name != "BotW: Material Blend" and len([socket for image, socket in socket_map.items() if 'Albedo' in socket]) > 1:
+    elif not is_a_tree and len(obj.data.color_attributes) > 0 and shader_name != "BotW: Material Blend" and len([socket for image, socket in socket_map.items() if 'Albedo' in socket]) > 1:
         shader_name = "BotW: Material Blend"
         material['WARNING'] = "Using material blend shader because there is a vertex color and >1 albedos."
 
@@ -1054,7 +1131,7 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
 
     return shader_name, socket_map
 
-def hookup_texture_nodes(collection, material, shader_node, socket_map) -> bool:
+def hookup_texture_nodes(collection, object, material, shader_node, socket_map) -> bool:
     nodes = material.node_tree.nodes
     links = material.node_tree.links
 
@@ -1085,7 +1162,7 @@ def hookup_texture_nodes(collection, material, shader_node, socket_map) -> bool:
         if socket_name == 'SPM' and pixel_image.has_green and not pixel_image.all_channels_match:
             spm_has_green = True
 
-        albedo_count, dye_count = create_helper_nodes(collection, material, img_node, pixel_image, socket_name, shader_node, albedo_count, dye_count, use_dye_labels)
+        albedo_count, dye_count = create_helper_nodes(collection, object, material, img_node, pixel_image, socket_name, shader_node, albedo_count, dye_count, use_dye_labels)
 
         # Hook up texture to target socket on the shader node group.
         shader_socket = shader_node.inputs.get(socket_name)
@@ -1550,10 +1627,23 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         # and this value is set on branch materials which are obviously double-sided in-game.
         # material.use_backface_culling = get_shader_property(material, 'shaderassign.options.uking_enable_backface_modify') == 1
         wind_intensity = get_shader_property(material, "matparam.uking_wind_vtx_transform_intensity.ValueFloat")
-        set_socket_value(shader_node, 'Wind Intensity', wind_intensity)
+        if wind_intensity:
+            set_socket_value(shader_node, 'Wind Intensity', min(wind_intensity, 0.1))
+        wind_use_height = get_shader_property(material, "shaderassign.options.uking_enable_wind_vtx_transform_height")
+        if not wind_use_height:
+            albedo = get_albedo_img_node(material)
+            if albedo and albedo.image and os.path.splitext(albedo.image.name)[0] in WIND_FORCE_USE_HEIGHT:
+                wind_use_height = True
+        if wind_use_height:
+            # Store how high the object reaches above the origin. This value is then used in the Fauna shader.
+            set_socket_value(shader_node, 'Wind Use Height', True)
+        alb_node = get_albedo_img_node(material)
+        if alb_node and alb_node.image and alb_node.image.name in LEAF_WIND_UV_ROTATIONS:
+            set_socket_value(shader_node, 'Wind UV Rotation', radians(LEAF_WIND_UV_ROTATIONS[alb_node.image.name]))
 
     for socket_name, value in (('Rubber', rubber), ('Metal', metal), ('Hair', hair)):
         set_socket_value(shader_node, socket_name, value)
+
 
 def set_socket_value(group_node, socket_name, socket_value, output=False):
     socket = group_node.inputs.get(socket_name)

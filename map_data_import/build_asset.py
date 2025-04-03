@@ -15,7 +15,7 @@ def main():
 
     try:
         botw_import_addon.operators.botw_batch_asset_import.ensure_caches(shared_mem_name="BOTW_ASSET_CACHE")
-        botw_import_addon.operators.botw_batch_asset_import.import_and_setup_single_dae(context, dae_path)
+        botw_import_addon.operators.botw_batch_asset_import.import_and_process_dae(context, dae_path)
         bpy.ops.outliner.orphans_purge()
         # NOTE: This could be more optimized if we moved the images and changed their paths, we wouldn't have to save twice,
         # but we would have to write more code which would be more opportunity for error so this feels safer.

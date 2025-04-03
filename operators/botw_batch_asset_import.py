@@ -281,7 +281,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                     continue
                 full_path = os.path.join(root, dae_name)
                 with Timer("Full Import", dae_name):
-                    imported_objects += import_and_setup_single_dae(
+                    imported_objects += import_and_process_dae(
                         context, 
                         full_path, 
                         asset_name, 
@@ -425,7 +425,7 @@ def ensure_world_and_lights(context) -> bpy.types.World:
     world = bpy.data.worlds.get(WORLD_NAME)
     return world
 
-def import_and_setup_single_dae(
+def import_and_process_dae(
         context, 
         full_path: str, 
         asset_name: str=None, 

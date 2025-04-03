@@ -1,3 +1,10 @@
+# This script makes material jsons that came out of my modified Switch Toolbox easier to process further.
+# The input is the folder containing the root of the Switch Toolbox batch model extract, and the output is a folder with a flat list of json files.
+# (It should be 27456 .json files adding up to almost 5gb)
+# NOTE: To avoid irresponsible use, the folders are NOT created for you, they need to exist before executing.
+input_dir = "D:/BotW Assets/Models Backup"
+output_dir = "D:/BotW Assets/Material Data Science/converted"
+
 import json, os
 from pathlib import Path
 from collections import defaultdict
@@ -14,9 +21,14 @@ def write_more_readable_json_data(models_dir, output_dir):
 
     # Loop through each JSON file
     for i, file in enumerate(json_files):
-        target_file = os.path.join(output_dir, os.path.basename(file))
+        json_dir_name = os.path.basename(os.path.dirname(file))
+        json_name = os.path.basename(file)
+        out_name = ".".join([json_dir_name, json_name.replace("_Mt_", ".Mt_")])
+        target_file = os.path.join(output_dir, out_name)
         print(f"{i+1}/{len(json_files)} {file}")
         if os.path.exists(target_file):
+            # Don't overwrite, so the script can resume progress in case it gets interrupted.
+            # If you want to start over, just delete the unfinished output files manually.
             continue
         # if i > 0:  # Limit for testing (can remove later)
         #    break
@@ -161,4 +173,4 @@ def save_json(data, filepath):
 
     print(f"Saved {filepath}")
 
-write_more_readable_json_data("D:/BotW Assets/Models Backup", "D:/BotW Assets/Material Data Science/converted/")
+write_more_readable_json_data(input_dir, output_dir)

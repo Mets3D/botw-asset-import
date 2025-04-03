@@ -13,9 +13,35 @@ Import issues:
 
     - There were also some tree ring materials that have a 2nd UVMap but shouldn't be using it
 
+Material notes
+    uking_texcoord5_mapping
+        1: only Gerudo faces and mouths.
+        20: A couple of terrain materials (Horizon & TeraWater)
+        21: Only Hylian faces.
+        22: Only Hylian eyeballs (which is why this occurs exactly twice as many times as the value 21)
+    uking_enable_texcoord5
+        1: Exactly if uking_texcoord5_mapping is 20, 21, 22
+    uking_texcoord5_srt
+        3: Exactly if uking_texcoord5_mapping is 1
+        5: Exactly if uking_texcoord5_mapping is 20, 21, 22
+    
+    uking_texcoord4_mapping
+        1: Only GanonGhost Grudge. I forget if that's the first or third(cinematic-only) Ganon.
+        11: Exclusively lava. (But not necessarily all lava materials, idk) TODO: Check shared properties of all materials with "Lava" in the name.
+        20: A variety of eyeballs, generic faces, bodies. TODO: Check shared properties of all "Mt_Eyeball_L/R"
+        22: Exactly if uking_texcoord5_mapping==21
+    
+    uking_texcoord4_srt
+        2: Only water (not necessarily all water in the game.) TODO: Check shared properties of everything with "Water" in the name or if the name is exactly "Mt_Fall"
+        4: Probably every eyeball in the game, probably every lava in the game, PLUS Horizon and TeraWater, PLUS GanonGhost, PLUS `Mt_AoC_Tenkyu_FirstDon_C_05`
+    shaderassign.options.uking_enable_texcoord4
+        1: Very similar to uking_texcoord4_srt==4, with maybe a bit more Grudge materials and some Hylian faces.
+
 Importer feature ideas:
     - See if we can figure out flow direction and speed of water and lava
         - Even if not, at least load a water shader whenever TerraWater albedo is used. Similar idea for lava probably.
+
+    - I wonder if `uking_texcoord_toon_spec_mapping` tells whether toon shader should be used.
 
     - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece. Could be fun to store and add related functionality to the BlankFile.blend scripts.
 

@@ -175,6 +175,7 @@ def cache_ensure_shader_data():
             for file_name in z.namelist():
                 with z.open(file_name) as file:
                     CACHE_shader_data[file_name] = json.loads(file.read())
+    return CACHE_shader_data
 
 def get_image_path(image_name: str) -> str:
     if not CACHE_image_paths:
@@ -514,7 +515,7 @@ def process_object(collection, obj, asset_name, uniqify_names=False, clean_names
             uv_layer.name = name
 
         for mat in obj.data.materials:
-            json_mat_name = collection['dirname'] + "_" + collection['file_name'] + "_" + mat['import_name'] + ".json"
+            json_mat_name = ".".join((collection['dirname'], collection['file_name'], mat['import_name'] + ".json"))
             mat['json_name'] = json_mat_name
             mat_data = get_shader_data(mat)
             if mat_data:
@@ -823,7 +824,7 @@ def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
 
     missing_tex_from_json = []
     tex_from_json = []
-    texture_maps = get_shader_property(material, 'TextureMaps')
+    texture_maps = get_shader_prop_of_mat(material, 'TextureMaps')
     if not texture_maps:
         return socket_map
     for name, tex_data in texture_maps.items():
@@ -912,9 +913,9 @@ def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
 
     for i in range(5):
         # Skipping last value on purpose because it's the same value across the whole game.
-        val = get_shader_property(material, f'matparam.texture_array_index{i}.ValueFloat')
+        val = get_shader_prop_of_mat(material, f'matparam>texture_array_index{i}>ValueFloat')
         tex_array_index_props.append(val)
-        shader_array_index_props.append(get_shader_property(material, f'shaderassign.options.uking_texture_array_texture{i}'))
+        shader_array_index_props.append(get_shader_prop_of_mat(material, f'shaderassign>options>uking_texture_array_texture{i}'))
 
     all_default = all([v==-1 for v in shader_array_index_props])
     tex_indicies = []
@@ -1039,7 +1040,13 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
 
     all_textures = list(socket_map.keys())+guessed_textures
 
-    shader_name = "BotW: Cel Shade"
+    if get_shader_prop_of_mat(material, 'shaderassign>options>uking_texcoord_toon_spec_srt') == 3:
+        # I am 100% confident that this value on this property is either the exact 
+        # flag for cel-shading, or at least it has a 1:1 correlation to cel shading.
+        shader_name = "BotW: Cel Shade"
+    else:
+        shader_name = "BotW: Smooth Shade"
+
     if "eye" in lc_obname or "eye" in material['import_name'].lower() and "mask" not in lc_obname and "ravio" not in lc_assetname:
         shader_name = "BotW: Eye"
     if "arrow" in lc_dirname:
@@ -1073,18 +1080,18 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
         shader_name = "BotW: Material Blend"
 
     # uking_wind_vtx_transform_channel
-    # shaderassign.options.uking_enable_wind_vtx_transform_coreinfo
-    # shaderassign.options.uking_enable_wind_vtx_transform_normal_lock
+    # shaderassign>options>uking_enable_wind_vtx_transform_coreinfo
+    # shaderassign>options>uking_enable_wind_vtx_transform_normal_lock
 
-    wind_enable = get_shader_property(material, "shaderassign.options.uking_enable_wind_vtx_transform")
-    wind_enable_lie = get_shader_property(material, "shaderassign.options.uking_enable_wind_vtx_transform_lie")
-    wind_enable_height = get_shader_property(material, "shaderassign.options.uking_enable_wind_vtx_transform_height")
+    wind_enable = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_wind_vtx_transform")
+    wind_enable_lie = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_wind_vtx_transform_lie")
+    wind_enable_height = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_wind_vtx_transform_height")
 
-    wind_int = get_shader_property(material, "matparam.uking_wind_vtx_transform_intensity.ValueFloat", index=0)
-    wind_lie_int = get_shader_property(material, "matparam.uking_wind_vtx_transform_lie_intensity.ValueFloat", index=0)
-    wind_height_int = get_shader_property(material, "matparam.uking_wind_vtx_transform_lie_height.ValueFloat", index=0)
+    wind_int = get_shader_prop_of_mat(material, "matparam>uking_wind_vtx_transform_intensity>ValueFloat", index=0)
+    wind_lie_int = get_shader_prop_of_mat(material, "matparam>uking_wind_vtx_transform_lie_intensity>ValueFloat", index=0)
+    wind_height_int = get_shader_prop_of_mat(material, "matparam>uking_wind_vtx_transform_lie_height>ValueFloat", index=0)
 
-    is_a_tree = get_shader_property(material, "shaderassign.options.uking_enable_lumberjack") == 1
+    is_a_tree = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_lumberjack") == 1
     uses_a_windy_albedo = albedo and (albedo.name in LEAF_WIND_UV_ROTATIONS or albedo.name in WIND_FORCE_USE_HEIGHT)
     force_no_wind = albedo and albedo.name in WIND_FORCE_NOWIND
     wind_enabled = (
@@ -1205,18 +1212,18 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
             set_socket_value(shader_node, f"Blend 1 Factor", 1)
 
         if len(shader_socket.links) == 0:
-            if shader_socket.name == 'Alpha' and get_shader_property(material, 'isTransparent') != 1:
+            if shader_socket.name == 'Alpha' and get_shader_prop_of_mat(material, 'isTransparent') != 1:
                 pass
             else:
                 links.new(img_node.outputs['Color'], shader_socket)
         else:
             print_later(f"Shader socket already taken: '{material.name}' -> '{img.name}' ({socket_name})")
 
-        if bool(get_shader_property(material, 'isTransparent')) != False:
+        if bool(get_shader_prop_of_mat(material, 'isTransparent')) != False:
             material.surface_render_method = get_alpha_mode(material)
         # Since transparency doesn't (always) get its own texture node, hook up the Alpha of the Albedo.
         alpha_socket = shader_node.inputs.get('Alpha')
-        if socket_name in ('Albedo', 'Fx Texture Distorted') and get_shader_property(material, 'isTransparent')==1 and pixel_image.has_alpha:
+        if socket_name in ('Albedo', 'Fx Texture Distorted') and get_shader_prop_of_mat(material, 'isTransparent')==1 and pixel_image.has_alpha:
             if alpha_socket and len(alpha_socket.links) == 0 and 'Alpha' in img_node.outputs:
                 links.new(img_node.outputs['Alpha'], alpha_socket)
         # But if after those steps we didn't hook up any alpha, don't set it to Blended, since that will cause sorting issues.
@@ -1419,7 +1426,7 @@ def get_shader_data(material) -> dict:
     return CACHE_shader_data.get(material['json_name'], {})
 
 def get_tex_data(material, img) -> dict:
-    tex_maps = get_shader_property(material, 'TextureMaps')
+    tex_maps = get_shader_prop_of_mat(material, 'TextureMaps')
     if not tex_maps:
         return {}
     return next((data for name, data in tex_maps.items() if name == Path(img.filepath).stem), {})
@@ -1428,7 +1435,7 @@ def get_alpha_mode(material) -> str:
     """Trying to guess what EEVEE alpha blending mode to use based on the 
     horrendous material data available."""
 
-    alpha_flag = get_shader_property(material, 'MaterialU.RenderState._flags') or 1
+    alpha_flag = get_shader_prop_of_mat(material, 'MaterialU>RenderState>_flags') or 1
 
     # NOTE: The keys are all the keys that occur in the game's materials, but the values are my guesses.
     zelda_blend_modes = {
@@ -1440,7 +1447,7 @@ def get_alpha_mode(material) -> str:
     }
     blend_mode = zelda_blend_modes.get(alpha_flag, "AlphaMask")
 
-    maybe_translucency_flag = get_shader_property(material, 'shaderassign.options.gsys_gbuffer_xlu')
+    maybe_translucency_flag = get_shader_prop_of_mat(material, 'shaderassign>options>gsys_gbuffer_xlu')
     if maybe_translucency_flag:
         return 'BLENDED'
     # shaderassign.options.uking_enable_gbuffer_xlu_blend
@@ -1455,12 +1462,18 @@ def texture_uses_first_uvmap(material, img) -> bool or None:
         return True
     tex_idx = tex_data['textureUnit'] - 1
 
-    # There are some other values here that could be relevant but I can't find solid correlations, as usual.
-    # enable_texcoord = get_shader_property(material, f'shaderassign.options.uking_enable_texcoord{tex_idx}')
-    # texcoord_mapping = get_shader_property(material, f'shaderassign.options.uking_texcoord{tex_idx}_mapping')
+    # There are a number of values here that sound relevant but I can't find solid correlations, as usual.
+
+    # Possible values: None, 1 (virtually a boolean)
+    # enable_texcoord = get_shader_property(material, f'shaderassign>options>uking_enable_texcoord{<0 to 5>}')
+
+    # Possible values: None, 1, 2, 3, 10, 11, 20, 22, 23, 104, 105, 107 (wtf...?)
+    # texcoord_mapping = get_shader_property(material, f'shaderassign>options>uking_texcoord{<0 to 7>}_mapping')
 
     # NOTE: TotK equivalent is apparently `o_texture{tex_idx}_texcoord`.
-    uv_idx = get_shader_property(material, f'shaderassign.options.uking_texture{tex_idx}_texcoord')
+    # Index can be from 0 to 7.
+    # Values can be None, 1 to 8
+    uv_idx = get_shader_prop_of_mat(material, f'shaderassign>options>uking_texture{tex_idx}_texcoord')
     return uv_idx == 0
 
 def hookup_rgb_nodes(material, shader_node):
@@ -1493,7 +1506,7 @@ def hookup_rgb_nodes(material, shader_node):
 
 def get_color_values(material) -> list[Vector]:
     colors = []
-    matparam = get_shader_property(material, 'matparam')
+    matparam = get_shader_prop_of_mat(material, 'matparam')
     if not matparam:
         return colors
     for name, data in matparam.items():
@@ -1503,26 +1516,29 @@ def get_color_values(material) -> list[Vector]:
             colors.append(vec)
     return colors
 
-def get_shader_property(material, prop_path, index=None):
+def get_shader_prop_of_mat(material, prop_path, index=None):
     shader_data = get_shader_data(material)
     if not shader_data:
         return None
-    prop = shader_data
+    return get_shader_prop(shader_data, prop_path, index)
 
-    for part in prop_path.split("."):
+def get_shader_prop(shader_data, prop_path, index=None):
+    prop = shader_data
+    for part in prop_path.split(">"):
         if isinstance(prop, dict):
-            prop = prop.get(part)
-        if not prop:
+            # NOTE: "N/A" (Not Available) is used rather than None or 0 or anything else, since all of those are valid and potentially meaningful values.
+            prop = prop.get(part, "N/A")
+        if prop == "N/A":
             break
 
-    if not prop:
-        prop = CACHE_mat_defaults.get(prop_path, None)
-    if not prop:
+    if prop == "N/A":
+        prop = CACHE_mat_defaults.get(prop_path, "N/A")
+    if prop == "N/A":
         for key, value in CACHE_mat_defaults.items():
             if "*" in key and re.match(key.replace("*", ".*"), prop_path):
                 prop = value
                 break
-    if not prop:
+    if prop == "N/A":
         return
 
     if type(prop) == list:
@@ -1599,14 +1615,15 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
             set_socket_value(shader_node, 'Emission Color', [0.513624, 0.105036, 0.022513, 1.000000])
     if 'ancient' in lc_assetname:
         set_socket_value(shader_node, 'Emission Color', [1.000000, 0.245151, 0.025910, 1.000000])
-    if 'import_name' in material:
-        if material['import_name'] == 'Mt_Lens':
-            set_socket_value(shader_node, 'Alpha', 0.05)
-        if collection['asset_name'] == 'Fierce Deity Mask' and material['import_name'] == 'Mt_Eyeemm':
-            set_socket_value(shader_node, 'Emission Color', [0.700000, 0.700000, 0.700000, 1.000000])
-            set_socket_value(shader_node, 'Emission Mask', 1.0)
-            if shader_node.inputs['Emission Mask'].links:
-                links.remove(shader_node.inputs['Emission Mask'].links[0])
+    if material['import_name'] in ('Mt_Lens', 'Mt_Glass'):
+        # TODO: Could probably hunt down a more reliable way to catch glass.
+        # This catches Tingle's clockface and Hylian glasses. I know there's also some glass outside of one of the tech labs.
+        set_socket_value(shader_node, 'Alpha', 0.05)
+    if collection['asset_name'] == 'Fierce Deity Mask' and material['import_name'] == 'Mt_Eyeemm':
+        set_socket_value(shader_node, 'Emission Color', [0.700000, 0.700000, 0.700000, 1.000000])
+        set_socket_value(shader_node, 'Emission Mask', 1.0)
+        if shader_node.inputs['Emission Mask'].links:
+            links.remove(shader_node.inputs['Emission Mask'].links[0])
     if 'Hylian Hair' in collection['asset_name'] or 'Hylian Child Hair' in collection['asset_name']:
         set_socket_value(shader_node, 'Albedo', [0.833908, 0.530669, 0.151620, 1.000000])
     if 'Hylian Beard' in collection['asset_name']:
@@ -1618,7 +1635,7 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         set_socket_value(shader_node, 'Albedo Tint', [0.291138, 0.190097, 0.088846, 1.000000])
 
     if shader_node.node_tree.name == 'BotW: Material Blend':
-        set_socket_value(shader_node, "Transparent Edges", get_shader_property(material, 'isTransparent') or False)
+        set_socket_value(shader_node, "Transparent Edges", get_shader_prop_of_mat(material, 'isTransparent') or False)
         ensure_edge_attribute(bpy.context, obj)
 
     if shader_node.node_tree.name == 'BotW: Fauna':
@@ -1626,10 +1643,10 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         # On the leaves it's no longer necessary since I use Displacement to pull apart z-fighting planes,
         # and this value is set on branch materials which are obviously double-sided in-game.
         # material.use_backface_culling = get_shader_property(material, 'shaderassign.options.uking_enable_backface_modify') == 1
-        wind_intensity = get_shader_property(material, "matparam.uking_wind_vtx_transform_intensity.ValueFloat")
+        wind_intensity = get_shader_prop_of_mat(material, "matparam>uking_wind_vtx_transform_intensity>ValueFloat")
         if wind_intensity:
             set_socket_value(shader_node, 'Wind Intensity', min(wind_intensity, 0.1))
-        wind_use_height = get_shader_property(material, "shaderassign.options.uking_enable_wind_vtx_transform_height")
+        wind_use_height = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_wind_vtx_transform_height")
         if not wind_use_height:
             albedo = get_albedo_img_node(material)
             if albedo and albedo.image and os.path.splitext(albedo.image.name)[0] in WIND_FORCE_USE_HEIGHT:

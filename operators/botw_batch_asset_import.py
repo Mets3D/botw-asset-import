@@ -1136,6 +1136,7 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
     links = material.node_tree.links
 
     shader_name = shader_node.node_tree.name
+    # Only use dye labels if the number of albedo textures is exactly the number of dyes in the game.
     use_dye_labels = len([img for img, socket in socket_map.items() if socket=='Albedo']) == len(DYES)
     albedo_count = 0
     dye_count = 0
@@ -1157,12 +1158,23 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
         if socket_name in ("", "Unknown"):
             socket_name = guess_socket_name(img, shader_name)
 
-        img_node.location = (-300, i* -300)
+        img_node.location = (-300, (i-dye_count)* -300)
+
+        if socket_name == 'Albedo' and shader_name == 'BotW: Cel Shade':
+            existing_albedo = get_albedo_img_node(material)
+            if existing_albedo and existing_albedo.image and existing_albedo.image.name.split(".")[0] == img_node.image.name.split(".")[0]:
+                dye_count += 1
+                img_node.label = str(dye_count)
+                if use_dye_labels:
+                    img_node.label += ": " + DYES[dye_count]
+                img_node.location = (-300, dye_count*60)
+                img_node.hide = True
+            albedo_count += 1
 
         if socket_name == 'SPM' and pixel_image.has_green and not pixel_image.all_channels_match:
             spm_has_green = True
 
-        albedo_count, dye_count = create_helper_nodes(collection, object, material, img_node, pixel_image, socket_name, shader_node, albedo_count, dye_count, use_dye_labels)
+        create_helper_nodes(collection, object, material, img_node, pixel_image, socket_name, shader_node)
 
         # Hook up texture to target socket on the shader node group.
         shader_socket = shader_node.inputs.get(socket_name)
@@ -1277,7 +1289,7 @@ def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
 
     return ""
 
-def create_helper_nodes(collection, object, material, img_node, pixel_image, socket_name, shader_node, albedo_count=0, dye_count=0, use_dye_labels=False) -> tuple[int, int]:
+def create_helper_nodes(collection, object, material, img_node, pixel_image, socket_name, shader_node) -> tuple[int, int]:
     shader_name = shader_node.node_tree.name
     nodes = material.node_tree.nodes
     links = material.node_tree.links
@@ -1296,15 +1308,6 @@ def create_helper_nodes(collection, object, material, img_node, pixel_image, soc
             eye_rig_node.width = 300
             eye_rig_node.name = "Eye Rig"
         links.new(eye_rig_node.outputs[0], img_node.inputs[0])
-    elif socket_name == 'Albedo' and shader_name == 'BotW: Cel Shade':
-        if albedo_count > 0:
-            dye_count += 1
-            img_node.label = str(albedo_count)
-            if use_dye_labels:
-                img_node.label += ": " + DYES[albedo_count]
-            img_node.location = (-300, dye_count*60)
-            img_node.hide = True
-        albedo_count += 1
     elif socket_name == 'Fx Texture':
         distorted_img = nodes.new("ShaderNodeTexImage")
         distorted_img.image = img_node.image
@@ -1350,8 +1353,6 @@ def create_helper_nodes(collection, object, material, img_node, pixel_image, soc
             img_node.label = "(no green; sketch highlight mask)"
     elif socket_name == 'Metallic':
         set_socket_value(shader_node, 'Roughness', METAL_ROUGHNESS)
-
-    return albedo_count, dye_count
 
 def ensure_UV_node(object, material, img_node, shader_name):
     if img_node.type != 'TEX_IMAGE':
@@ -1405,7 +1406,6 @@ def ensure_UV_node(object, material, img_node, shader_name):
                 uv_node.location = fallback_node.location + Vector((-200, 0))
                 links.new(uv_node.outputs[0], fallback_node.inputs[0])
             links.new(fallback_node.outputs[0], img_node.inputs[0])
-
 
 def get_shader_data(material) -> dict:
     """Tried to optimize json loading by caching but it's insignificant."""
@@ -1643,7 +1643,6 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
 
     for socket_name, value in (('Rubber', rubber), ('Metal', metal), ('Hair', hair)):
         set_socket_value(shader_node, socket_name, value)
-
 
 def set_socket_value(group_node, socket_name, socket_value, output=False):
     socket = group_node.inputs.get(socket_name)

@@ -1,6 +1,4 @@
 Import issues:
-    - Materials with dyes won't have the image nodes spaced correctly, again.
-
     - Wrong UVMap assigned
         Obj_TreeStump_Broadleaf_A_01
         Obj_TreeStump_Coniferous_A_01

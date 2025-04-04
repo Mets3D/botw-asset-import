@@ -1,4 +1,9 @@
 Import issues:
+    - Shield material of Siteboss_Sword is not getting set up properly (should be a different shader)
+        - Everything that uses an EmmMsk texture (such as Siteboss_Sword) should use emission scroll.
+    - I'd be curious about `TwnObj_HunterHouse_A_01` in-game, since the current import adds moss to the wood but it looks kinda shit.
+    - Weapon_Lsword_023 (chainsaw) doesn't import very gud.
+        - We should probably stop adding any other guessed_textures beside dye textures...
     - Wrong UVMap assigned
         Obj_TreeStump_Broadleaf_A_01
         Obj_TreeStump_Coniferous_A_01
@@ -14,6 +19,8 @@ Import issues:
     - There were also some tree ring materials that have a 2nd UVMap but shouldn't be using it
 
 Material notes
+    uking_enable_normalmap2 could be a candidate for whether material blending is used.
+
     uking_texcoord5_mapping
         1: only Gerudo faces and mouths.
         20: A couple of terrain materials (Horizon & TeraWater)
@@ -36,6 +43,16 @@ Material notes
         4: Probably every eyeball in the game, probably every lava in the game, PLUS Horizon and TeraWater, PLUS GanonGhost, PLUS `Mt_AoC_Tenkyu_FirstDon_C_05`
     shaderassign.options.uking_enable_texcoord4
         1: Very similar to uking_texcoord4_srt==4, with maybe a bit more Grudge materials and some Hylian faces.
+
+    uking_texcoord0_mapping
+        1: Hylian faces and some dragon bits
+        11: Some water, Horizon & TeraWater
+        104: Lava
+    uking_enable_texcoord0
+        None: "InsideMat", "InsideArea", and some Tera materials like TeraGrass, TeraFlower, TeraTerrain
+        1: Everything else
+    uking_texcoord0_srt
+        1: Some blades and shields. TODO: Import these and take a looksie?
 
 Importer feature ideas:
     - See if we can figure out flow direction and speed of water and lava

@@ -10,6 +10,7 @@ module_names = (
     "progressbar",
     "timer",
     "widgets",
+    "mesh",
 )
 
 

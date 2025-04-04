@@ -18,6 +18,7 @@ from ..utils.deduplicate_materials import deduplicate_materials, hash_material
 from ..utils.timer import Timer
 from ..utils.pixel_image import PixelImage
 from ..utils.dae_fixer import fix_dae_uvmaps_in_place
+from ..utils.mesh import is_uvmap_all_zero, are_uv_maps_identical
 
 PRINT_LATER = []
 
@@ -206,7 +207,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
 
     apply_transforms: BoolProperty(name="Apply Transforms", description="Objects import with correct transforms, but in some cases that means having a 90 degree rotation on X. This should probably only be disabled if you're a modder and you need to", default=True)
     remove_redundant_armatures: BoolProperty(name="Remove Redundant Armatures", description="If an armature has only 1 bone and it's at the world origin, or if it doesn't deform any objects with any of its bones, remove it", default=True)
-    
+    remove_redundant_UVs: BoolProperty(name="Remove Redundant UVs", description="If a UVMap is the same as a previous one, or if it's empty, remove it", default=True)
+
     create_parent_collections: BoolProperty(name="Create Parent Collections", description="When a directory has more than 1 file, create a parent collection that represents that directory", default=True)
 
     deduplicate_materials: BoolProperty(name="Deduplicate Materials", description="If two materials end up with identical nodetrees, merge them into one", default=True)
@@ -290,6 +292,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                         clean_names=self.rename_clean_names,
                         apply_transforms=self.apply_transforms,
                         remove_redundant_armatures=self.remove_redundant_armatures,
+                        remove_redundant_UVs=self.remove_redundant_UVs,
                     )
             counter += 1
 
@@ -434,7 +437,8 @@ def import_and_process_dae(
         uniqify_names=False, 
         clean_names=True,
         apply_transforms=True,
-        remove_redundant_armatures=True
+        remove_redundant_armatures=True,
+        remove_redundant_UVs=True,
     ) -> list[bpy.types.Object]:
     dae_filename = os.path.basename(full_path)
     asset_name = asset_name or os.path.splitext(dae_filename)[0]
@@ -471,15 +475,31 @@ def import_and_process_dae(
 
     ret_objs = []
     for obj in objs:
-        obj = process_object(collection, obj, asset_name, uniqify_names, clean_names, remove_redundant_armatures)
+        obj = process_object(
+            collection, 
+            obj, 
+            asset_name=asset_name, 
+            uniqify_names=uniqify_names, 
+            clean_names=clean_names, 
+            remove_redundant_armatures=remove_redundant_armatures,
+            remove_redundant_UVs=remove_redundant_UVs,
+        )
         if obj:
             ret_objs.append(obj)
             hide_obj_if_useless(collection, obj)
 
-
     return ret_objs
 
-def process_object(collection, obj, asset_name, uniqify_names=False, clean_names=True, remove_redundant_armatures=True):
+def process_object(
+        collection, 
+        obj, 
+        *,
+        asset_name, 
+        uniqify_names=False, 
+        clean_names=True, 
+        remove_redundant_armatures=True,
+        remove_redundant_UVs=True,
+    ):
     if obj.type == 'ARMATURE':
         if obj.animation_data and obj.animation_data.action:
             obj.animation_data.action = None
@@ -499,6 +519,16 @@ def process_object(collection, obj, asset_name, uniqify_names=False, clean_names
                 # This will happen often if `rename_unknown_assets==False` but `rename_ob_mat_unique==True`.
                 # That's just not a recommended combination of settings.
                 print_later("Couldn't rename due to 63-char limit: ", obj.name, new_name)
+
+        if remove_redundant_UVs:
+            uvs_to_delete = []
+            for i, uv_layer in enumerate(obj.data.uv_layers):
+                if is_uvmap_all_zero(obj, i):
+                    uvs_to_delete.append(uv_layer)
+                elif i>0 and any([are_uv_maps_identical(obj, i, j) for j in range(i)]):
+                    uvs_to_delete.append(uv_layer)
+            for bad_uv in uvs_to_delete:
+                obj.data.uv_layers.remove(bad_uv)
 
         if len(obj.vertex_groups) == 1 and 'Root' in obj.vertex_groups:
             obj.vertex_groups.clear()
@@ -531,16 +561,15 @@ def process_object(collection, obj, asset_name, uniqify_names=False, clean_names
 
             if uniqify_names:
                 new_name = asset_name + ": " + new_name
+                if new_name != mat.name and new_name in bpy.data.materials:
+                    # If the material with this name already exists, overwrite it.
+                    # Since material names are unique, this should only happen when trying 
+                    # to delete and re-import an asset, and forgetting to purge.
+                    existing_mat = bpy.data.materials.get(new_name)
+                    existing_mat.user_remap(mat)
+                    bpy.data.materials.remove(existing_mat)
 
-            if new_name != mat.name and new_name in bpy.data.materials:
-                # If the material with this name already exists, overwrite it.
-                # Since material names are unique, this should only happen when trying 
-                # to delete and re-import an asset, and forgetting to purge.
-                existing_mat = bpy.data.materials.get(new_name)
-                existing_mat.user_remap(mat)
-                bpy.data.materials.remove(existing_mat)
-            else:
-                mat.name = new_name
+            mat.name = new_name
 
             with Timer("Setup material", mat.name):
                 process_material(collection, obj, mat)
@@ -1040,9 +1069,10 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
 
     all_textures = list(socket_map.keys())+guessed_textures
 
-    if get_shader_prop_of_mat(material, 'shaderassign>options>uking_texcoord_toon_spec_srt') == 3:
-        # I am 100% confident that this value on this property is either the exact 
-        # flag for cel-shading, or at least it has a 1:1 correlation to cel shading.
+    if (
+        get_shader_prop_of_mat(material, 'shaderassign>options>uking_texcoord_toon_spec_srt') == 3 # This is the flag for regular Cel shading.
+        or get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair')==402 # This is the flag for hair Cel shading (3 cels instead of 2 in hair)
+    ):
         shader_name = "BotW: Cel Shade"
     else:
         shader_name = "BotW: Smooth Shade"
@@ -1060,12 +1090,12 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
             guessed_textures = [img for img in guessed_textures if "stone" in img.name.lower()]
         else:
             guessed_textures = [img for img in guessed_textures if ("stone" not in img.name.lower()) and ("_A_" not in img.name)]
-    if any(["Blade_Fx" in img.name for img in all_textures]):
-        if "blade" in lc_matname:
+    if any(["Blade_Fx" in img.name or "Shield_Fx" in img.name for img in all_textures]):
+        if "blade" or "shield" in lc_matname:
             shader_name = "BotW: Ancient Weapon Blade"
-            guessed_textures = [img for img in guessed_textures if "Blade_Fx" in img.name]
+            guessed_textures = [img for img in guessed_textures if "Blade_Fx" in img.name or "Shield_Fx" in img.name]
         else:
-            guessed_textures = [img for img in guessed_textures if "Blade_Fx" not in img.name]
+            guessed_textures = [img for img in guessed_textures if "Blade_Fx" not in img.name or "Shield_Fx" in img.name]
     elif any(["EmmMsk.1" in img.name for img in all_textures]) and not any([word in material['import_name'].lower() for word in ('handle', '_02')]):
         shader_name = "BotW: Elemental Weapon"
     elif any(["Emm_Emm" in img.name for img in all_textures]) and 'Divine' in collection['asset_name']:
@@ -1155,7 +1185,7 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
         if socket_name != 'Albedo' and pixel_image.is_single_color:
             # If the whole image is just one color, use an RGB node instead.
             img_node = nodes.new(type="ShaderNodeRGB")
-            img_node.outputs[0].default_value = pixel_image.pixels_rgba[0]
+            img_node.outputs[0].default_value = list(pixel_image.average_color) + [1]
         else:
             img_node = nodes.new(type="ShaderNodeTexImage")
             img_node.image = img
@@ -1287,7 +1317,7 @@ def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
         return "Emission Scroll"
     elif "_emm" in lc_img_name:
         return "Emission Mask"
-    elif "blade_fx" in lc_img_name:
+    elif "blade_fx" in lc_img_name or "shield_fx" in lc_img_name:
         return "Fx Texture"
     elif "_mtl" in lc_img_name:
         return "Metallic"
@@ -1319,7 +1349,7 @@ def create_helper_nodes(collection, object, material, img_node, pixel_image, soc
         distorted_img = nodes.new("ShaderNodeTexImage")
         distorted_img.image = img_node.image
         distorted_img.width = img_node.width
-        distorted_img.location = img_node.location + Vector((0, -300))
+        distorted_img.location = img_node.location + Vector((0, 300))
         distortion_shader = ensure_nodetree('BotW: Ancient Weapon Blade Heat Distortion')
         distortion_node = nodes.new("ShaderNodeGroup")
         distortion_node.location = distorted_img.location + Vector((-400, 0))
@@ -1327,6 +1357,7 @@ def create_helper_nodes(collection, object, material, img_node, pixel_image, soc
         distortion_node.node_tree = distortion_shader
         links.new(distortion_node.outputs[0], distorted_img.inputs[0])
         links.new(distorted_img.outputs[0], shader_node.inputs['Fx Texture Distorted'])
+        links.new(distorted_img.outputs[1], shader_node.inputs['Alpha'])
     elif socket_name == 'Emission Scroll':
         # Only on elemental weapons and obliterator.
         scroll_node = nodes.get("UV Scroll")
@@ -1371,8 +1402,8 @@ def ensure_UV_node(object, material, img_node, shader_name):
     img = img_node.image
     tex_data = get_tex_data(material, img)
     if tex_data:
-        pong_x = tex_data['WrapModeS'] == 'Mirror'
-        pong_y = tex_data['WrapModeT'] == 'Mirror'
+        pong_x = tex_data.get('WrapModeS', "Repeat") == 'Mirror'
+        pong_y = tex_data.get('WrapModeT', "Repeat") == 'Mirror'
         if pong_x or pong_y:
             pingpong_node = nodes.get("PingPong UVs")
             if not pingpong_node:
@@ -1592,23 +1623,20 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
 
     links = material.node_tree.links
 
-    metal, rubber, hair = False, False, False
+    metal, rubber = False, False
     rubbery_words = ['rubber']
-    hairy_words = ['hair', 'hari', 'fur', 'mane']
     if spm_has_green:
         if any([word in lc_obname for word in rubbery_words]):
             rubber = True
         else:
             # If there's an SPM green channel and it's not for rubber, then it's for metal.
             metal = True
-    if any([word in lc_obname+obj['import_name'].lower() for word in hairy_words]):
-        hair = True
     if "arrow" in lc_dirname:
         metal = True
 
     # Hardcode some other values.
     if collection['asset_name'] == "Majora's Mask":
-        rubber, hair, metal = True, True, False
+        rubber, metal = True, False
         if 'eye' in lc_matname:
             set_socket_value(shader_node, 'Emission Color', [0.026384, 0.485653, 0.003931, 1.000000])
         else:
@@ -1658,7 +1686,9 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         if alb_node and alb_node.image and alb_node.image.name in LEAF_WIND_UV_ROTATIONS:
             set_socket_value(shader_node, 'Wind UV Rotation', radians(LEAF_WIND_UV_ROTATIONS[alb_node.image.name]))
 
-    for socket_name, value in (('Rubber', rubber), ('Metal', metal), ('Hair', hair)):
+    if get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair')==402:
+        set_socket_value(shader_node, "Hair", True)
+    for socket_name, value in (('Rubber', rubber), ('Metal', metal)):
         set_socket_value(shader_node, socket_name, value)
 
 def set_socket_value(group_node, socket_name, socket_value, output=False):

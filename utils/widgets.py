@@ -17,8 +17,9 @@ def ensure_widget(wgt_name, source_file="") -> Object:
     # Check if it already exists locally.
     if not wgt_name.startswith("WGT-"):
         wgt_name = "WGT-" + wgt_name
-    old_wgt_ob = bpy.data.objects.get((wgt_name, None))
-    if old_wgt_ob and not link:
+    lib = next((lib.filepath for lib in bpy.data.libraries if lib.filepath.endswith("resources.blend")), None) if link else None
+    old_wgt_ob = bpy.data.objects.get((wgt_name, lib))
+    if old_wgt_ob:
         # Object exists and we don't want to overwrite it, so just return it.
         return old_wgt_ob
 

@@ -11,6 +11,7 @@ module_names = (
     "timer",
     "widgets",
     "mesh",
+    "string",
 )
 
 

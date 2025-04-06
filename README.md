@@ -1,6 +1,6 @@
 ### What's this
 
-This is a Blender extension to import BotW assets in .dae & .fbx format into Blender with a lot of automated clean-up. It includes various shaders which will be assigned automatically. I made it for the creation of an asset library for use in Blender for fan-art and modding purposes.
+This is a Blender extension to import BotW assets in .dae & .fbx format into Blender with a lot of automated clean-up. It includes various shaders which will be assigned automatically. I made it to enable the creation of 3D fan-art, but it can be useful for previewing mod content as well.
 
 ### Installation & file paths
 
@@ -14,7 +14,7 @@ Install like any other add-on that isn't on the Extension Platform:
 - Follow the instruction on the "Textures/Icons/Animations Folder" inputs' tooltips (that appear on mouse hover) to browse the correct folders.
 
 ### How to use
-- Use [my modified Switch Toolbox](https://github.com/Mets3D/Switch-Toolbox/releases) to extract the game's models (.dae), textures (.png), inventory icons (.jpg), material data (.json) and animations (.seanim). Everything except .dae is optional but recommended.
+- Use [my modified Switch Toolbox](https://github.com/Mets3D/Switch-Toolbox/releases) to extract the game's models (.dae), textures (.png), inventory icons (.jpg), and animations (.seanim). Everything except .dae is optional but recommended.
 - Convert the .dae files to .fbx using a tool like [Noesis](https://richwhitehouse.com/index.php?content=inc_projects.php&showproject=91), to fix bone rotations. The .fbx files must be directly next to the .dae files, with the same exact name. Without this step, animations will not work.
 - Browse the appropriate folders in the add-on's preferences.
 - Enable Blender's .dae and .fbx importers.
@@ -75,3 +75,11 @@ This section is for the technically curious. How does the add-on get so much mat
 - All textures except Albedo should be set to Non-Color colorspace. Although there are a handful of _Emm textures that are actually emission color, but we're talking like 3 textures in the whole game.
 
 You get the idea. There are a bunch more texture suffixes, but the point is, we start with the name of the .dae file, its folder, and the albedo texture, and we just hard-code a bunch of stuff from there and hope for the best. After import, these strings are stored in custom properties in case they might be useful for anything in the future.
+
+### Credits
+This project wouldn't have been possible without at least the following open source projects:
+- [Switch Toolbox](https://github.com/KillzXGaming/Switch-Toolbox)
+- [bmubin](https://github.com/augmero/bmubin)
+- [seanim importer](https://github.com/SE2Dev/io_anim_seanim)
+- [Noesis](https://richwhitehouse.com/index.php?content=inc_projects.php&showproject=91)
+Furthermore, a big thank you to [thejudsub](https://www.youtube.com/watch?v=Sb3CRU2DufU) for his Blender shading tutorial series.

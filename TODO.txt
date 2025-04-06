@@ -1,25 +1,13 @@
-Import issues:
-    - Shield material of Siteboss_Sword is not getting set up properly (should be a different shader)
-        - Everything that uses an EmmMsk texture (such as Siteboss_Sword) should use emission scroll.
-    - I'd be curious about `TwnObj_HunterHouse_A_01` in-game, since the current import adds moss to the wood but it looks kinda shit.
-    - Weapon_Lsword_023 (chainsaw) doesn't import very gud.
-        - We should probably stop adding any other guessed_textures beside dye textures...
-    - Wrong UVMap assigned
-        Obj_TreeStump_Broadleaf_A_01
-        Obj_TreeStump_Coniferous_A_01
-        Obj_TreeStump_Moss_A_01
-
-    - Things that don't get their albedo hooked up
-        Obj_Plant_HopBush_D_01
-        Obj_Plant_Juniperus_A_Red
-            And the UV nodes are also a mess because of pingpong+UV fallback not combining properly. I thought I had code for that!
-        Obj_Plant_Juniperus_B_Red
-        Obj_Plant_Juniperus_C_Red
-
-    - There were also some tree ring materials that have a 2nd UVMap but shouldn't be using it
 
 Material notes
     uking_enable_normalmap2 could be a candidate for whether material blending is used.
+    uking_sampler_use_array is basically a guarantee, because `uking_texture_array_texture1/2/3/4/5` is only ever 1 instead of -1 whenever sampler_use_array is also 1.
+
+    Trying to figure out UVMap assignments:
+        `uking_texture_array_texture0/1/2/3/4/5` are only ever `1` if `uking_sampler_use_array` is also 1.
+        So `uking_sampler_use_array==1` is a strong candidate to be the flag for materials that blend multiple textures together. HOWEVER... Out of 2810 materials that have this flag, 530 of them don't have ANY `uking_texture_array_texture0/1/2/3/4/5==1`. 
+        These seem to be some statues, scaffoldings, house walls, and even a lot of materials that have "_Blend" in their names. Of course, a material that CAN blend multiple textures doesn't absolutely have to, so the easy explanation would be that that's what these 530 cases are; The material blending shader is used "just in case" an artist might want to mix materials, but they chose not to.
+        But alas. Some of these materials simply have two regular albedos/normals specified among their TextureMaps, and they just want to mix between those.
 
     uking_texcoord5_mapping
         1: only Gerudo faces and mouths.

@@ -19,6 +19,7 @@ from ..utils.timer import Timer
 from ..utils.pixel_image import PixelImage
 from ..utils.dae_fixer import fix_dae_uvmaps_in_place
 from ..utils.mesh import is_uvmap_all_zero, are_uv_maps_identical
+from ..utils.string import increment_name
 
 PRINT_LATER = []
 
@@ -40,7 +41,7 @@ LEAF_WIND_UV_ROTATIONS = {
     'PlantTreeTropicalLeaf_A_Alb' : 90,
     'Leaf_TreeWillow_A_02_Alb' : 90,
     'Leaf_TreeWillow_A_01_Alb' : 180,
-    'Plant_PalmJungle_A_Leaf_01_Alb': -90,
+    'Plant_PalmJungle_A_Leaf_01_Alb': 90,
     'Plant_TreeBananaMiniLeaf_S_A_Alb' : -90,
     'Plant_TreeBananaLeaf_S_A_Alb' : -90,
     'PlantPalmBeach_A_Leaf_Alb' : -90,
@@ -80,12 +81,19 @@ WIND_FORCE_USE_HEIGHT = [
     'Plant_Weed_B_Alb',
     'CmnTex_Plant_Tropical_A_Alb',
     'CmnTex_Plant_Tropical_B_Alb',
+    'Plant_VioletCliff_A_Alb',
+    'Plant_LightGrass_A_Alb',
 ]
 WIND_FORCE_NOWIND = [
     'CmnTex_Plant_KorokWood_A_01_Alb',
     'Plant_KorokColor_Chg_0_Alb',
     'Plant_Korok_Chg_0_Alb',
-    'Plant_LightGrass_A_Alb',
+]
+LEAF_ZFIGHT_HACK = [
+    # These tree leaf meshes z-fight with the snowy leaves and win, when they shouldn't.
+    ('Obj_TreeConiferous_A_Snow_01', 'A21__Mt_Treeleaf_01'),
+    ('Obj_TreeConiferous_A_Snow_02', 'A1__Mt_Treeleaf_01'),
+    ('Obj_TreeConiferous_A_Snow_03', 'A10__Mt_Treeleaf_01'),
 ]
 
 METAL_ROUGHNESS = 0.6
@@ -205,7 +213,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     rename_prepend: BoolProperty(name="Prepend Asset to Object Names", description="Prepend asset name to object and material names. Useful when importing many assets into a single file to keep names unique, but can also result in exceeding the 63-character limit. Those cases will be skipped (not renamed)", default=True)
     rename_clean_names: BoolProperty(name="Clean Object & Material Names", description="", default=True)
 
-    apply_transforms: BoolProperty(name="Apply Transforms", description="Objects import with correct transforms, but in some cases that means having a 90 degree rotation on X. This should probably only be disabled if you're a modder and you need to", default=True)
+    apply_transforms: BoolProperty(name="Apply Transforms", description="Objects import with correct transforms, but in some cases they are not their default transforms. This should probably only be disabled if you're a modder and you plan to export this back into the game. Applying transforms is also necessary for wind shader effects to work", default=True)
     remove_redundant_armatures: BoolProperty(name="Remove Redundant Armatures", description="If an armature has only 1 bone and it's at the world origin, or if it doesn't deform any objects with any of its bones, remove it", default=True)
     remove_redundant_UVs: BoolProperty(name="Remove Redundant UVs", description="If a UVMap is the same as a previous one, or if it's empty, remove it", default=True)
 
@@ -486,7 +494,9 @@ def import_and_process_dae(
         )
         if obj:
             ret_objs.append(obj)
-            hide_obj_if_useless(collection, obj)
+            hide_obj_if_useless(obj)
+            if apply_transforms:
+                hack_zfighting_leaves(collection, obj)
 
     return ret_objs
 
@@ -507,7 +517,6 @@ def process_object(
             bpy.data.objects.remove(obj)
             return
     elif obj.type == 'MESH':
-        obj['import_name'] = obj.name
         if clean_names:
             rename_object(obj)
 
@@ -541,7 +550,6 @@ def process_object(
             # NOTE: I shouldn't have force-named the UV maps by their "purpose" since it often isn't accurate. 
             # But it's kinda too late to fix now. Sorry!
             # Sometimes there's also a 3rd UV layer.
-            # TODO: Might want to check here to see if all coordinates are at (0,0) and remove if so.
             uv_layer.name = name
 
         for mat in obj.data.materials:
@@ -577,6 +585,12 @@ def process_object(
 
     obj.data.name = obj.name
     return obj
+
+def hack_zfighting_leaves(collection, obj):
+    for filename, obname in LEAF_ZFIGHT_HACK:
+        if collection['file_name'] == filename and obj['import_name'] == obname:
+            obj.location.z = -0.025
+            return
 
 def is_armature_useful(arm_ob) -> bool:
     """Returns True if it deforms any of its child objects and consists of 
@@ -653,20 +667,16 @@ def tidy_name(name):
 
     return new_name
 
-def hide_obj_if_useless(collection, obj):
-    """Hide specific troublesome objects."""
+def hide_obj_if_useless(obj):
+    """Hide specific useless objects."""
+    if obj.type != 'MESH':
+        return
     hide = False
     if any([s in obj.name for s in GARBAGE_MATS]):
-        # Certain materials aren't visible in-game.
         hide = True
-    objs_to_hide = [
-        # These tree leaf meshes z-fight with the snowy leaves and aren't necessary.
-        ('Obj_TreeConiferous_A_Snow_01', 'A21__Mt_Treeleaf_01'),
-        ('Obj_TreeConiferous_A_Snow_02', 'A1__Mt_Treeleaf_01'),
-        ('Obj_TreeConiferous_A_Snow_03', 'A10__Mt_Treeleaf_01'),
-    ]
-    if any([collection['file_name'] == filename and obj['import_name'] == obname for filename, obname in objs_to_hide]):
-        hide = True
+    for m in obj.data.materials:
+        if any([s in m.name for s in GARBAGE_MATS]):
+            hide = True
 
     obj.hide_viewport, obj.hide_render = hide, hide
 
@@ -732,17 +742,18 @@ def import_dae_or_fbx(context, *, is_dae: bool, filepath: str, discard_types=('E
     bpy.ops.transform.translate()
     if apply_transforms:
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-    for ob in context.selected_objects[:]:
-        if ob.type in discard_types:
-            bpy.data.objects.remove(ob)
+    for obj in context.selected_objects[:]:
+        if obj.type in discard_types:
+            bpy.data.objects.remove(obj)
             continue
-        if ob.type == 'MESH':
-            for m in ob.data.materials:
-                if 'import_name' not in m:
-                    orig_name = m.name
+        if obj.type == 'MESH':
+            obj['import_name'] = obj.name[:-4] if obj.name[-4]=="." and obj.name[-3:].isdigit() else obj.name
+            for mat in obj.data.materials:
+                if 'import_name' not in mat:
+                    orig_name = mat.name
                     if len(orig_name) > 4 and orig_name[-4] == ".":
                         orig_name = orig_name[:-4]
-                    m['import_name'] = orig_name
+                    mat['import_name'] = mat.name[:-4] if mat.name[-4]=="." and mat.name[-3:].isdigit() else mat.name
     return context.selected_objects[:]
 
 def cleanup_fbx_armature(context, fbx_arm):
@@ -819,13 +830,20 @@ def process_material(collection, obj, material):
                 existing.name = existing.name[:-2]
                 return
 
-    socket_map = load_assigned_textures(material)
-    shader_name, socket_map = guess_shader_and_textures(collection, obj, material, socket_map)
+    textures = load_assigned_json_textures(material)
+    shader_name = guess_shader(collection, obj, material, textures)
+    socket_map = guess_sockets_for_textures(material, textures, shader_name)
+    if shader_name == 'BotW: Material Blend':
+        more_textures = load_blend_textures(material, socket_map)
+        if not more_textures:
+            shader_name = 'BotW: Smooth Shade'
+        socket_map.update(more_textures)
+    elif shader_name == 'BotW: Cel Shade':
+        albedo = next((img for img, socket_name in socket_map.items() if socket_name=='Albedo'), None)
+        if albedo:
+            dye_textures = guess_dye_textures(albedo)
+            socket_map.update([(tex, 'Albedo') for tex in dye_textures])
     shader_node = init_nodetree(material, shader_name)
-
-    # if shader_name != 'BotW: Material Blend' and len(obj.data.color_attributes) > 0:
-    #     material['WARNING'] = "Unused vertex color. This material should probably use Terrain textures blended using the vertex color info."
-    #     print_later(f"UNUSED VERTEX COLOR: {obj.name}")
 
     # Create image nodes, guess UV layer by name, set image color spaces
     with Timer("Hookup tex nodes", material.name):
@@ -836,26 +854,18 @@ def process_material(collection, obj, material):
     fix_material_viewport_display(material)
     material['hash'] = hash_material(material)
 
-def load_assigned_textures(material) -> OrderedDict[bpy.types.Image, str]:
-    socket_map = load_assigned_json_textures(material)
-    socket_map.update(load_assigned_dae_textures(material))
-    socket_map.update(load_assigned_tile_textures(material))
-
-    # NOTE: The order of this dictionary matters, as the first entry for each socket will win.
-
-    return socket_map
-
-def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
+def load_assigned_json_textures(material) -> list[bpy.types.Image]:
     """If a material was assigned a 'shader_data' custom property, that's data
     we extracted from the .bmat using my modified version of Switch Toolbox.
     """
-    socket_map = OrderedDict()
 
-    missing_tex_from_json = []
-    tex_from_json = []
     texture_maps = get_shader_prop_of_mat(material, 'TextureMaps')
     if not texture_maps:
-        return socket_map
+        return []
+
+    missing_tex_from_json = []
+    textures = []
+
     for name, tex_data in texture_maps.items():
         if name in ('MaterialAlb', 'MaterialCmb', 'ForReplace_Lumberjack'):
             continue
@@ -864,8 +874,44 @@ def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
             print_later(f"Couldn't find texture: '{material.name}' -> {name}")
             missing_tex_from_json.append(name)
             continue
-        type = tex_data.get('Type', "Diffuse").strip()
+        textures.append(img)
 
+    if missing_tex_from_json:
+        material['missing_textures'] = str(missing_tex_from_json)
+
+    return textures
+
+def load_blend_textures(material, socket_map) -> OrderedDict[bpy.types.Image, str]:
+    """Based on https://github.com/augmero/bmubin/blob/main/scripts/asset/shader_fixer.py"""
+    alb_blend_idx = 1
+    nrm_blend_idx = 1
+    new_socket_map = OrderedDict()
+    tex_indicies = material.get('blend_indicies', [])
+    for i, tex_index in enumerate(tex_indicies):
+        albedo = ensure_loaded_img(f"MaterialAlb_Slice_{tex_index}_.png")
+        if albedo:
+            if 'Albedo' not in list(socket_map.values()):
+                new_socket_map[albedo] = "Albedo"
+            else:
+                new_socket_map[albedo] = f'Albedo Blend {alb_blend_idx}'
+                alb_blend_idx += 1
+        normal = ensure_loaded_img(f"MaterialCmb_Slice_{tex_index}_.png")
+        if normal:
+            if 'Normal Map' not in list(socket_map.values()):
+                new_socket_map[normal] = "Normal Map"
+            else:
+                new_socket_map[normal] = f'Normal Blend {nrm_blend_idx}'
+                nrm_blend_idx += 1
+
+    return new_socket_map
+
+def guess_sockets_for_textures(material, textures, shader_name) -> OrderedDict[bpy.types.Image, str]:
+    socket_map = OrderedDict()
+    tex_types = []
+    for img in textures:
+        tex_data = get_tex_data(material, img)
+        assert tex_data != {}
+        type = tex_data['Type'].strip()
         if type == 'Unknown':
             sampler = tex_data['SamplerName']
             # If the material data doesn't give us the texture type, we have some fallbacks to guess.
@@ -897,15 +943,12 @@ def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
             else:
                 # There may be other useful sampler names for determining texture type.
                 pass
-        tex_from_json.append((type, img))
+        tex_types.append((type, img))
 
-    if missing_tex_from_json:
-        material['missing_textures'] = str(missing_tex_from_json)
-
-    for type, img in tex_from_json:
+    for type, img in tex_types:
         # NOTE: Can add support for more shader socket names here.
         if type == 'Diffuse':
-            if "_Red_Alb" in img.name:
+            if "_Red_Alb" in img.name and shader_name=='BotW: Cel Shade':
                 socket_map[img] = "Skin Red Albedo"
             else:
                 socket_map[img] = "Albedo"
@@ -923,72 +966,6 @@ def load_assigned_json_textures(material) -> OrderedDict[bpy.types.Image, str]:
             socket_map[img] = "Metallic"
         else:
             socket_map[img] = type
-
-    return socket_map
-
-def load_assigned_dae_textures(material) -> OrderedDict[bpy.types.Image, str]:
-    dae_tex_names = material.get('dae_textures', [])
-    tex_from_dae = [ensure_loaded_img(img_name) for img_name in dae_tex_names]
-    return OrderedDict([(img, guess_socket_name(img)) for img in tex_from_dae if img])
-
-def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
-    """Based on https://github.com/augmero/bmubin/blob/main/scripts/asset/shader_fixer.py"""
-
-    # texture_array_index has 6 integers between 0-82.
-    # These definitely correspond directly to the textures inside content/Terrain,
-    # and their order seems to matter too.
-    tex_array_index_props = []
-    shader_array_index_props = []
-
-    for i in range(5):
-        # Skipping last value on purpose because it's the same value across the whole game.
-        val = get_shader_prop_of_mat(material, f'matparam>texture_array_index{i}>ValueFloat')
-        tex_array_index_props.append(val)
-        shader_array_index_props.append(get_shader_prop_of_mat(material, f'shaderassign>options>uking_texture_array_texture{i}'))
-
-    all_default = all([v==-1 for v in shader_array_index_props])
-    tex_indicies = []
-    for tex_index_value, shader_array_value in zip(tex_array_index_props, shader_array_index_props):
-        if tex_index_value in (-1, None):
-            continue
-        if shader_array_value == -1 and not all_default:
-            # If not all ShaderOptions are -1 but this one is,
-            # the corresponding terrain texture is not actually used.
-            # This most commonly happens for tex_array_prop==0.
-            continue
-
-        if tex_index_value in tex_indicies:
-            continue
-        if tex_index_value == 0 and all_default:
-            # Terrain texture index 0 is a grass texture, but if the corresponding 
-            # ShaderOptions values are all defaults, it's the same as if it existed with a value of -1;
-            # So just like in the above case, this is not actually a reference to that grass texture.
-            continue
-        tex_indicies.append(int(tex_index_value))
-
-    socket_map = OrderedDict()
-    if tex_indicies == []:
-        return socket_map
-
-    material['tile_textures'] = str(tex_indicies)
-
-    alb_blend_idx = 1
-    nrm_blend_idx = 1
-    for i, tex_index in enumerate(tex_indicies):
-        albedo = ensure_loaded_img(f"MaterialAlb_Slice_{tex_index}_.png")
-        if albedo:
-            if 'Albedo' not in list(socket_map.values()):
-                socket_map[albedo] = "Albedo"
-            else:
-                socket_map[albedo] = f'Albedo Blend {alb_blend_idx}'
-                alb_blend_idx += 1
-        normal = ensure_loaded_img(f"MaterialCmb_Slice_{tex_index}_.png")
-        if normal:
-            if 'Normal Map' not in list(socket_map.values()):
-                socket_map[normal] = "Normal Map"
-            else:
-                socket_map[normal] = f'Normal Blend {nrm_blend_idx}'
-                nrm_blend_idx += 1
 
     return socket_map
 
@@ -1030,93 +1007,76 @@ def guess_colorspace(material, img):
 
     return 'Non-Color'
 
-def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict) -> tuple[str, OrderedDict[bpy.types.Image, str]]:
-    """Guess shader type and textures based on the albedo, the object name, and so on."""
-    socket_map = socket_map.copy()
+def guess_shader(collection, obj, material, all_textures):
     lc_obname = obj.name.lower()
-    lc_matname = material.name.lower()
-    lc_dirname = (collection.get('dirname') or "").lower()
     lc_assetname = (collection.get('asset_name') or "").lower()
 
-    albedo = next((img for img, socket_name in socket_map.items() if socket_name=='Albedo'), None)
-    if not albedo:
-        # Try to find an albedo texture that imported from the .fbx.
-        nodes = material.node_tree.nodes
-        for node in nodes:
-            if node.type == 'TEX_IMAGE':
-                img = node.image
-                if not img:
-                    continue
-                img_name = os.path.basename(img.filepath)
-                img.name = img_name
-                img = ensure_loaded_img(img_name)
-                if not img:
-                    continue
-                if img != node.image:
-                    img.user_remap(img)
-                if "_alb" in img.name.lower():
-                    albedo = img
-
-    # Find all other textures with the same base name.
-    guessed_textures = []
-    if albedo:
-        textureset_name = albedo.name.split("_Alb")[0]
-    else:
-        textureset_name = collection['dirname']
-    for img_name, _filepath in CACHE_image_paths.items():
-        if img_name.startswith(textureset_name):
-            extra_name_part = img_name[len(textureset_name):]
-            if not any([extra_name_part.startswith(suf) for suf in TEX_SUFFIXES]):
-                # This avoids things like "Bear" ending up with textures of "Beard" and such mis-matches.
-                continue
-            if "eye" in img_name.lower() and "eye" not in textureset_name.lower():
-                # This avoids eg. animals using their eye textures for the body material.
-                continue
-            img = bpy.data.images.get(img_name) or ensure_loaded_img(img_name)
-            if img and img not in socket_map:
-                guessed_textures.append(img)
-
-    all_textures = list(socket_map.keys())+guessed_textures
-
-    if (
-        get_shader_prop_of_mat(material, 'shaderassign>options>uking_texcoord_toon_spec_srt') == 3 # This is the flag for regular Cel shading.
-        or get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair')==402 # This is the flag for hair Cel shading (3 cels instead of 2 in hair)
-    ):
-        shader_name = "BotW: Cel Shade"
-    else:
-        shader_name = "BotW: Smooth Shade"
-
-    if get_shader_prop_of_mat(material, 'shaderassign>samplers>_a0') == '_fx0':
-        shader_name = "BotW: Ancient Weapon Blade"
-    elif "eye" in lc_obname or "eye" in material['import_name'].lower() and "mask" not in lc_obname and "ravio" not in lc_assetname:
-        shader_name = "BotW: Eye"
-    elif "arrow" in lc_dirname:
-        if lc_dirname.endswith("_a"):
-            # arrow bundles.
-            if "Stone" in collection['dirname'] + obj['import_name']:
-                guessed_textures = [img for img in guessed_textures if "_A_Stone" in img.name]
-            else:
-                guessed_textures = [img for img in guessed_textures if "_A_" in img.name and "stone" not in img.name.lower()]
-        elif "Stone" in collection['dirname'] + obj['import_name']:
-            guessed_textures = [img for img in guessed_textures if "stone" in img.name.lower()]
-        else:
-            guessed_textures = [img for img in guessed_textures if ("stone" not in img.name.lower()) and ("_A_" not in img.name)]
-    elif any(["EmmMsk.1" in img.name for img in all_textures]) and not any([word in material['import_name'].lower() for word in ('handle', '_02')]):
-        shader_name = "BotW: Elemental Weapon"
-    elif any(["Emm_Emm" in img.name for img in all_textures]) and 'Divine' in collection['asset_name']:
-        shader_name = "BotW: Divine Eye"
-    elif any(["clrmak" in img.name.lower() or "clrmsk" in img.name.lower() for img in all_textures]):
-        shader_name = "BotW: Generic NPC"
-
+    fallback_shader = "BotW: Cel Shade"
     for prefix in OBJ_PREFIXES:
         if collection['dirname'].startswith(prefix):
-            shader_name = "BotW: Smooth Shade"
-    if 'tile_textures' in material:
-        shader_name = "BotW: Material Blend"
+            fallback_shader = "BotW: Smooth Shade"
+            break
 
+    if (
+        get_shader_prop_of_mat(material, 'shaderassign>options>uking_texcoord_toon_spec_srt') == 3 # Strong correspondance to regular Cel shading. (not 100% perfect, eg. Link's earrings)
+        or get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair')==402 # This is the flag for hair Cel shading (3 cels instead of 2 in hair) (I think this is 100%)
+    ):
+        return "BotW: Cel Shade"
+    if get_shader_prop_of_mat(material, 'shaderassign>samplers>_a0') == '_fx0':
+        return "BotW: Ancient Weapon Blade"
+
+    if "eye" in lc_obname or "eye" in material['import_name'].lower() and "mask" not in lc_obname and "ravio" not in lc_assetname:
+        # TODO: I'm almost sure we can find a consistent way to identify eye materials, just didn't get around to it yet.
+        return "BotW: Eye"
+
+    if any(["EmmMsk.1" in img.name for img in all_textures]) and not any([word in material['import_name'].lower() for word in ('handle', '_02')]):
+        return "BotW: Elemental Weapon"
+    if any(["Emm_Emm" in img.name for img in all_textures]) and 'Divine' in collection['asset_name']:
+        return "BotW: Divine Eye"
+    elif any(["clrmak" in img.name.lower() or "clrmsk" in img.name.lower() for img in all_textures]):
+        return "BotW: Generic NPC"
+
+    albedo = next((img for img in all_textures if img.colorspace_settings.name=='sRGB'), None)
+    if albedo:
+        wind_enabled = is_blown_by_wind(material, os.path.splitext(albedo.name)[0])
+        if wind_enabled:
+            # NOTE: We store this property even if we don't think this material uses height-based wind, 
+            # since detection for that is unreliable, and if we were to manually enable that checkbox in 
+            # a material, we'll need this property to be present.
+            obj['wind_height'] = max([bboxpoint[2] for bboxpoint in obj.bound_box])
+            if 'custom_normal' in obj.data.attributes:
+                # Disable custom normals without deleting them.
+                # They tend to make the leaves look a lot worse in Blender.
+                obj.data.attributes['custom_normal'].name = 'custom_normal_bkp'
+            material.displacement_method = 'BOTH'
+            return "BotW: Fauna"
+    else:
+        material['WARNING: Albedo Missing!'] = True
+
+    blend_indicies = get_indicies_for_material_blend(material)
+    if blend_indicies:
+        material['blend_indicies'] = blend_indicies
+        return "BotW: Material Blend"
+    elif len(obj.data.color_attributes) > 0 and len([img for img in all_textures if img.colorspace_settings.name=='sRGB']) > 1:
+        if not is_a_tree(material):
+            material['WARNING'] = "Using material blend shader because there is a vertex color and >1 albedos."
+            return "BotW: Material Blend"
+
+    print_later("Failed to guess shader for material: "+material.name)
+    return fallback_shader
+
+def is_a_tree(material):
+    return get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_lumberjack") == 1
+
+def is_blown_by_wind(material, albedo_name=""):
+    """I couldn't find a reliable indicator for this, which is very frustrating. 
+    But there's only a finite number of leaf textures in the game, 
+    so I just hard-coded some data."""
+
+    # Other flags I checked, but to no avail:
     # uking_wind_vtx_transform_channel
-    # shaderassign>options>uking_enable_wind_vtx_transform_coreinfo
-    # shaderassign>options>uking_enable_wind_vtx_transform_normal_lock
+    # shaderassign>options>uking_enable_wind_vtx_transform_coreinfo     # Most of these are indeed blown by the wind, but not nearly all of them.
+    # shaderassign>options>uking_enable_wind_vtx_transform_normal_lock  # Most of these or maybe all of them are NOT blown by the wind. Maybe this indicates that objects that are blown by the wind should collide with this material, but I doubt that.
 
     wind_enable = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_wind_vtx_transform")
     wind_enable_lie = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_wind_vtx_transform_lie")
@@ -1126,9 +1086,8 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
     wind_lie_int = get_shader_prop_of_mat(material, "matparam>uking_wind_vtx_transform_lie_intensity>ValueFloat", index=0)
     wind_height_int = get_shader_prop_of_mat(material, "matparam>uking_wind_vtx_transform_lie_height>ValueFloat", index=0)
 
-    is_a_tree = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_lumberjack") == 1
-    uses_a_windy_albedo = albedo and (albedo.name in LEAF_WIND_UV_ROTATIONS or albedo.name in WIND_FORCE_USE_HEIGHT)
-    force_no_wind = albedo and albedo.name in WIND_FORCE_NOWIND
+    uses_a_windy_albedo = (albedo_name in LEAF_WIND_UV_ROTATIONS or albedo_name in WIND_FORCE_USE_HEIGHT)
+    force_no_wind = albedo_name in WIND_FORCE_NOWIND
     wind_enabled = (
         (
             (wind_enable_height and wind_height_int != 0.5) or
@@ -1136,42 +1095,63 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
             (wind_enable and wind_int != 0.1) or
             uses_a_windy_albedo
         ) and
-        not is_a_tree and
+        not is_a_tree(material) and
         not force_no_wind
     )
-    if wind_enabled:
-        # NOTE: We store this property even if we don't think this material uses height-based wind, 
-        # since detection for that is unreliable, and if we were to manually enable that checkbox in 
-        # a material, we'll need this property to be present.
-        obj['wind_height'] = max([bboxpoint[2] for bboxpoint in obj.bound_box])
-        shader_name = "BotW: Fauna"
-        if 'custom_normal' in obj.data.attributes:
-            # Disable custom normals without deleting them.
-            # They tend to make the leaves look a lot worse in Blender.
-            obj.data.attributes['custom_normal'].name = 'custom_normal_bkp'
-        material.displacement_method = 'BOTH'
-    elif not is_a_tree and len(obj.data.color_attributes) > 0 and shader_name != "BotW: Material Blend" and len([socket for image, socket in socket_map.items() if 'Albedo' in socket]) > 1:
-        shader_name = "BotW: Material Blend"
-        material['WARNING'] = "Using material blend shader because there is a vertex color and >1 albedos."
+    return wind_enabled
 
-    def order_texture_list(imgs: list[bpy.types.Image]) -> list[bpy.types.Image]:
-        order = ["Alb", "Msk", "AO", "Spm", "Nrm", "Emm", "Fx"]
-        return sorted(imgs,
-            key=lambda img: 
-            [
-                int(c) if c.isdigit() else c for c in re.split(r'(\d+)',
-                str(next((i for i, word in enumerate(order) if word in img.name), -1)) + img.name)
-            ]
-        )
+def get_indicies_for_material_blend(material):
+    # texture_array_index has 6 integers between 0-82.
+    # These definitely correspond directly to the textures inside content/Terrain,
+    # and their order seems to matter too.
+    tex_array_index_props = []
+    shader_array_index_props = []
 
-    # Order the textures nicely
-    guessed_textures = order_texture_list(guessed_textures)
-    if guessed_textures:
-        material['guessed_textures'] = [img.name for img in guessed_textures]
+    for i in range(5):
+        # Skipping last value on purpose because it's the same value across the whole game.
+        val = get_shader_prop_of_mat(material, f'matparam>texture_array_index{i}>ValueFloat')
+        tex_array_index_props.append(val)
+        shader_array_index_props.append(get_shader_prop_of_mat(material, f'shaderassign>options>uking_texture_array_texture{i}'))
 
-    socket_map.update({img:guess_socket_name(img, shader_name) for img in guessed_textures})
+    all_default = all([v==-1 for v in shader_array_index_props])
+    tex_indicies = []
+    for tex_index_value, shader_array_value in zip(tex_array_index_props, shader_array_index_props):
+        if tex_index_value in (-1, None):
+            continue
+        if shader_array_value == -1 and not all_default:
+            # If not all ShaderOptions are -1 but this one is,
+            # the corresponding terrain texture is not actually used.
+            # This most commonly happens for tex_array_prop==0.
+            continue
 
-    return shader_name, socket_map
+        if tex_index_value in tex_indicies:
+            continue
+        if tex_index_value == 0 and all_default:
+            # Terrain texture index 0 is a grass texture, but if the corresponding 
+            # ShaderOptions values are all defaults, it's the same as if it existed with a value of -1;
+            # So just like in the above case, this is not actually a reference to that grass texture.
+            continue
+        tex_indicies.append(int(tex_index_value))
+
+    return tex_indicies
+
+def guess_dye_textures(albedo) -> list[bpy.types.Image]:
+    """Find alt textures of an albedo."""
+    img = albedo
+    dye_textures = []
+    next_name = albedo.name
+    while img:
+        next_name = increment_name(next_name)
+        if next_name == albedo.name:
+            # No numbers in the name.
+            break
+
+        img = ensure_loaded_img(next_name)
+        if not img:
+            break
+
+        dye_textures.append(img)
+    return dye_textures
 
 def hookup_texture_nodes(collection, object, material, shader_node, socket_map) -> bool:
     nodes = material.node_tree.nodes
@@ -1227,21 +1207,20 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
             print_later(f"Couldn't find shader socket: '{material.name}' -> '{socket_name}'")
             continue
 
-        # Bit of a hack, re-direct Material Blend socket names that need to know the shader type. 
-        # Could do this in load_assigned_textures, but I cba to re-organize the code to already know the shader type by the time that function runs.
-        if shader_node.node_tree.name == 'BotW: Material Blend':
-            # This shader blends up to 3 materials together.
-            if len(shader_socket.links) > 0:
-                if socket_name == 'Albedo':
-                    socket_name = 'Albedo Blend 1'
-                elif socket_name == 'Normal Map':
-                    socket_name = 'Normal Blend 1'
-                elif socket_name == 'Albedo Blend 1':
-                    socket_name = 'Albedo Blend 2'
-                elif socket_name == 'Normal Blend 1':
-                    socket_name = 'Normal Blend 2'
-                shader_socket = shader_node.inputs.get(socket_name)
-                img_node.label = socket_name + " " + img_node.label
+        # # Bit of a hack, re-direct Material Blend socket names that need to know the shader type. 
+        # if shader_node.node_tree.name == 'BotW: Material Blend':
+        #     # This shader blends up to 3 materials together.
+        #     if len(shader_socket.links) > 0:
+        #         if socket_name == 'Albedo':
+        #             socket_name = 'Albedo Blend 1'
+        #         elif socket_name == 'Normal Map':
+        #             socket_name = 'Normal Blend 1'
+        #         elif socket_name == 'Albedo Blend 1':
+        #             socket_name = 'Albedo Blend 2'
+        #         elif socket_name == 'Normal Blend 1':
+        #             socket_name = 'Normal Blend 2'
+        #         shader_socket = shader_node.inputs.get(socket_name)
+        #         img_node.label = socket_name + " " + img_node.label
 
         if socket_name == "Albedo Blend 1":
             set_socket_value(shader_node, f"Blend 1 Factor", 1)
@@ -1286,9 +1265,9 @@ def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
         return "Eye Shadow"
 
     if "_alb" in lc_img_name:
-        if "_red_alb" in lc_img_name:
+        if "_red_alb" in lc_img_name and shader_name=='BotW: Cel Shade':
             return "Skin Red Albedo"
-        elif "_damage_alb" in lc_img_name:
+        elif "_damage_alb" in lc_img_name and shader_name=='BotW: Cel Shade':
             return "Skin Damage Albedo"
         return "Albedo"
         
@@ -1493,7 +1472,7 @@ def get_alpha_mode(material) -> str:
     return 'BLENDED' if blend_mode == 'Translucent' else 'DITHERED'
 
 def texture_uses_first_uvmap(material, img) -> bool or None:
-    """An educated guess."""
+    """Trying to make an educated guess but I really wish I could find a sure way to tell what texture uses what UVMap."""
     tex_data = get_tex_data(material, img)
     if not tex_data:
         return True
@@ -1501,9 +1480,9 @@ def texture_uses_first_uvmap(material, img) -> bool or None:
     if tex_data['SamplerName'] == "_fx0":
         return True
 
-    # There are a number of values here that sound relevant but I can't find solid correlations, as usual.
+    # There are some values that sound relevant but I can't find solid correlations...
 
-    # Possible values: None, 1 (virtually a boolean)
+    # Possible values: None, 1
     # enable_texcoord = get_shader_property(material, f'shaderassign>options>uking_enable_texcoord{<0 to 5>}')
 
     # Possible values: None, 1, 2, 3, 10, 11, 20, 22, 23, 104, 105, 107 (wtf...?)
@@ -1513,7 +1492,11 @@ def texture_uses_first_uvmap(material, img) -> bool or None:
     # Index can be from 0 to 7.
     # Values can be None, 1 to 8
     uv_idx = get_shader_prop_of_mat(material, f'shaderassign>options>uking_texture{tex_idx}_texcoord')
-    return uv_idx == 0
+    # This sounds like it should refer to what UVMap is used by a texture at the given index in the texturelist
+    # but the fact that it works very often is more of a coincidence of the fact that tex_idx of Albedos is usually 0
+    # and the default value of uking_texture0_texcoord is usually None. So, we might as well be returning `"_Alb" in img.name`,
+    # which is a bit disappointing.
+    return uv_idx == None
 
 def hookup_rgb_nodes(material, shader_node):
     nodes = material.node_tree.nodes
@@ -1671,8 +1654,14 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         set_socket_value(shader_node, 'Albedo Tint', [0.291138, 0.190097, 0.088846, 1.000000])
 
     if shader_node.node_tree.name == 'BotW: Material Blend':
-        set_socket_value(shader_node, "Transparent Edges", get_shader_prop_of_mat(material, 'isTransparent') or False)
+        # Transparent edges are used by meshes that sometimes help blend between different terrain objects.
+        # (But idk yet how to detect them. The commented line below had way too many false positives.)
+        # set_socket_value(shader_node, "Transparent Edges", get_shader_prop_of_mat(material, 'isTransparent') or False)
         ensure_edge_attribute(bpy.context, obj)
+        # Whenever the moss is used it just looks way too much/bad and idk how to fix it, let's just turn it down.
+        albedo = get_albedo_img_node(material)
+        if albedo.image and 'Moss' in albedo.image.name or 'MaterialAlb_Slice_8' in albedo.image.name:
+            set_socket_value(shader_node, "Blend 1 Factor", 0)
 
     if shader_node.node_tree.name == 'BotW: Fauna':
         # Interpreting `uking_enable_backface_modify` as backface culling seems to do more harm than good.
@@ -1691,8 +1680,10 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
             # Store how high the object reaches above the origin. This value is then used in the Fauna shader.
             set_socket_value(shader_node, 'Wind Use Height', True)
         alb_node = get_albedo_img_node(material)
-        if alb_node and alb_node.image and alb_node.image.name in LEAF_WIND_UV_ROTATIONS:
-            set_socket_value(shader_node, 'Wind UV Rotation', radians(LEAF_WIND_UV_ROTATIONS[alb_node.image.name]))
+        if alb_node and alb_node.image:
+            img_name = os.path.splitext(alb_node.image.name)[0]
+            if img_name in LEAF_WIND_UV_ROTATIONS:
+                set_socket_value(shader_node, 'Wind UV Rotation', radians(LEAF_WIND_UV_ROTATIONS[img_name]))
 
     if get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair')==402:
         set_socket_value(shader_node, "Hair", True)

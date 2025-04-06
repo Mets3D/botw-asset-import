@@ -1,10 +1,10 @@
 import bpy, os
-from bpy.props import StringProperty, EnumProperty
+from bpy.props import StringProperty, EnumProperty, BoolProperty
 from mathutils import Matrix, Euler
 from math import radians
 from ..utils.collections import ensure_collection
 from .build_asset_library import ALL_MAP_SECTIONS, BLEND_DIR, load_instance_database
-
+from collections import defaultdict
 
 class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
     """Import one chunk of the overworld"""
@@ -23,6 +23,11 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
         description="Section of the map to import",
         items=[(s, s, "Map Section "+s) for s in ALL_MAP_SECTIONS],
         default="B-7",
+    )
+    ignore_duplicates: BoolProperty(
+        name="Ignore Duplicates",
+        description="Sometimes the same object is placed in the same location multiple times. This option fixes that.",
+        default=True
     )
 
     def invoke(self, context, _event):
@@ -43,6 +48,7 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
 
         coll_root = ensure_collection(context, self.map_section, context.scene.collection)
         coll_root_temp = ensure_collection(context, self.map_section+"_temp", context.scene.collection)
+        object_matrices = defaultdict(list)
         for is_dynamic, assets in zip((True, False), (dynamic_assets, static_assets)):
             for asset_name, data in assets.items():
                 coll_linked_asset = ensure_asset_collection(self.blend_dir, asset_name)
@@ -59,8 +65,6 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
                     loc = transforms['location']
                     rot = transforms['rotate']
                     scale = transforms['scale']
-                    empty = bpy.data.objects.new(name=asset_name, object_data=None)
-
                     # this is a bit complicated, but it works
                     # useful link for explaining order of matrix operations
                     # https://blender.stackexchange.com/questions/44760/rotate-objects-around-their-origin-along-a-global-axis-scripted-without-bpy-op
@@ -68,7 +72,13 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
                     t_m = Matrix.Translation(loc)
                     r_m1 = Matrix.Rotation(radians(90), 4, 'X')
                     r_m2 = Euler(rot).to_matrix().to_4x4()
-                    empty.matrix_world = r_m1 @ t_m @ r_m2 @ r_m0
+                    matrix = r_m1 @ t_m @ r_m2 @ r_m0
+                    existing_copies = object_matrices[asset_name]
+                    if self.ignore_duplicates and matrix in existing_copies:
+                        continue
+                    existing_copies.append(matrix)
+                    empty = bpy.data.objects.new(name=asset_name, object_data=None)
+                    empty.matrix_world = matrix
                     empty.scale = scale
                     empty['is_dynamic'] = is_dynamic
                     empty.empty_display_size = 0.01

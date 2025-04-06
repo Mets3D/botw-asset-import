@@ -1,11 +1,11 @@
 # This script makes material jsons that came out of my modified Switch Toolbox easier to process further.
 # The input is the folder containing the root of the Switch Toolbox batch model extract, and the output is a folder with a flat list of json files.
 # (It should be 27456 .json files adding up to almost 5gb)
-# NOTE: To avoid irresponsible use, the folders are NOT created for you, they need to exist before executing.
+# NOTE: To avoid irresponsible use, output_dir is NOT created for you, needs to exist before executing.
 input_dir = "D:/BotW Assets/Models Backup"
-output_dir = "D:/BotW Assets/Material Data Science/converted"
+out_dir = "D:/BotW Assets/Material Data Science/converted"
 
-import json, os
+import json, os, re
 from pathlib import Path
 from collections import defaultdict
 
@@ -15,17 +15,36 @@ def write_more_readable_json_data(models_dir, output_dir):
     # Define the root directory
     root_dir = Path(models_dir)
 
-    # Recursively find all .json files
-    json_files = list(root_dir.rglob("*.json"))
-    json_files = [f for f in json_files if 'Deferred' not in f.as_posix() and 'SceneMaterial_MasterMaterial' not in f.as_posix()]
+    # Find all .dae files. We can't just rely on the .json files because it's not clear 
+    # from their name where the object name begins and ends (because I should've used a 
+    # different separator in Switch Toolbox than _)
+    # NOTE: The material name does NOT always start with Mt_, eg. in FldObj_RuinStatueKnight_B_01, 
+    # there's a material named Face_zou_Mt_Rock_RuinStatueKnightCrack_A. Face_zou is part of the material name, not the object.
+    
+    missing_materials = []
+    materials_that_didnt_start_with_mt = []
+    
+    dae_files = list(root_dir.rglob("*.dae"))
+    json_files = []
+    for i, dae_filepath in enumerate(dae_files):
+        print(f"Processing .dae: {i}/{len(dae_files)} {dae_filepath}")
+        mat_names = read_dae_material_names(dae_filepath)
+        dirpath = os.path.dirname(dae_filepath)
+        obj_name = os.path.splitext(os.path.basename(dae_filepath))[0]
+        for mat_name in mat_names:
+            json_files.append((dirpath, obj_name, mat_name))
 
-    # Loop through each JSON file
-    for i, file in enumerate(json_files):
-        json_dir_name = os.path.basename(os.path.dirname(file))
-        json_name = os.path.basename(file)
-        out_name = ".".join([json_dir_name, json_name.replace("_Mt_", ".Mt_")])
+    for i, (dirpath, obj_name, mat_name) in enumerate(json_files):
+        if not mat_name.startswith("Mt"):
+            materials_that_didnt_start_with_mt.append(mat_name)
+        json_dir_name = os.path.basename(dirpath)
+        out_name = ".".join([json_dir_name, obj_name, mat_name, "json"])
+        source_file = os.path.join(dirpath, obj_name+"_"+mat_name+".json")
+        if not os.path.isfile(source_file):
+            missing_materials.append((dirpath, obj_name, source_file))
+            continue
         target_file = os.path.join(output_dir, out_name)
-        print(f"{i+1}/{len(json_files)} {file}")
+        print(f"{i+1}/{len(json_files)} {source_file}")
         if os.path.exists(target_file):
             # Don't overwrite, so the script can resume progress in case it gets interrupted.
             # If you want to start over, just delete the unfinished output files manually.
@@ -33,7 +52,7 @@ def write_more_readable_json_data(models_dir, output_dir):
         # if i > 0:  # Limit for testing (can remove later)
         #    break
         try:
-            with open(file, "r", encoding="utf-8") as f:
+            with open(source_file, "r", encoding="utf-8") as f:
                 data = json.load(f)  # Load JSON data
                 data = traverse_json(data, flatten_single_key_dicts_processor)
                 data = traverse_json(data, remove_redundant_name_processor)
@@ -47,7 +66,35 @@ def write_more_readable_json_data(models_dir, output_dir):
                 save_json(data, target_file)
 
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            print(f"Skipping {file} due to error: {e}")
+            print(f"Skipping {source_file} due to error: {e}")
+
+    print("Materials that didn't start with Mt_:")
+    for mat in materials_that_didnt_start_with_mt:
+        # There are like 200 of them, so don't rely on _Mt_ for much of anything. (TODO)
+        print(mat)
+
+    print("Missing materials:")
+    for mat in missing_materials:
+        print(mat)
+
+def read_dae_material_names(filepath):
+    """
+    Reads a .dae file and extracts material IDs from the <library_materials> section.
+    
+    :param filepath: Path to the .dae file.
+    :return: List of material ID strings.
+    """
+    try:
+        with open(filepath, 'r', encoding='utf-8') as file:
+            content = file.read()
+        
+        # Regular expression to extract material ids
+        material_ids = re.findall(r'<material id="(.*?)"', content)
+        
+        return material_ids
+    except Exception as e:
+        print(f"Error reading file: {e}")
+        return []
 
 def traverse_json(data, process_key_value):
     """
@@ -173,4 +220,4 @@ def save_json(data, filepath):
 
     print(f"Saved {filepath}")
 
-write_more_readable_json_data(input_dir, output_dir)
+write_more_readable_json_data(input_dir, out_dir)

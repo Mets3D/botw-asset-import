@@ -949,6 +949,8 @@ def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
     all_default = all([v==-1 for v in shader_array_index_props])
     tex_indicies = []
     for tex_index_value, shader_array_value in zip(tex_array_index_props, shader_array_index_props):
+        if tex_index_value in (-1, None):
+            continue
         if shader_array_value == -1 and not all_default:
             # If not all ShaderOptions are -1 but this one is,
             # the corresponding terrain texture is not actually used.
@@ -962,7 +964,7 @@ def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
             # ShaderOptions values are all defaults, it's the same as if it existed with a value of -1;
             # So just like in the above case, this is not actually a reference to that grass texture.
             continue
-        tex_indicies.append(tex_index_value)
+        tex_indicies.append(int(tex_index_value))
 
     socket_map = OrderedDict()
     if tex_indicies == []:
@@ -970,23 +972,23 @@ def load_assigned_tile_textures(material) -> OrderedDict[bpy.types.Image, str]:
 
     material['tile_textures'] = str(tex_indicies)
 
-    alb_offset = 1
-    nrm_offset = 1
+    alb_blend_idx = 1
+    nrm_blend_idx = 1
     for i, tex_index in enumerate(tex_indicies):
         albedo = ensure_loaded_img(f"MaterialAlb_Slice_{tex_index}_.png")
         if albedo:
             if 'Albedo' not in list(socket_map.values()):
                 socket_map[albedo] = "Albedo"
-                alb_offset = 0
             else:
-                socket_map[albedo] = f'Albedo Blend {i+alb_offset}'
+                socket_map[albedo] = f'Albedo Blend {alb_blend_idx}'
+                alb_blend_idx += 1
         normal = ensure_loaded_img(f"MaterialCmb_Slice_{tex_index}_.png")
         if normal:
             if 'Normal Map' not in list(socket_map.values()):
                 socket_map[normal] = "Normal Map"
-                nrm_offset = 0
             else:
-                socket_map[normal] = f'Normal Blend {i+nrm_offset}'
+                socket_map[normal] = f'Normal Blend {nrm_blend_idx}'
+                nrm_blend_idx += 1
 
     return socket_map
 
@@ -1018,8 +1020,15 @@ def guess_colorspace(material, img):
     """This is a dangerously simple guess, but it works surprisingly alright."""
     tex_data = get_tex_data(material, img)
     if tex_data:
-        return 'Non-Color' if tex_data['Type'] != 'Diffuse' else 'sRGB'
-    return 'Non-Color' if "alb" not in img.name.lower() else 'sRGB'
+        if tex_data['Type'] == 'Diffuse':
+            return 'sRGB'
+        elif tex_data['Type'] == 'Unknown' and "_Alb" in img.name or "MaterialAlb" in img.name:
+            return 'sRGB'
+
+    if "_Alb" in img.name or "MaterialAlb" in img.name:
+        return 'sRGB'
+
+    return 'Non-Color'
 
 def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict) -> tuple[str, OrderedDict[bpy.types.Image, str]]:
     """Guess shader type and textures based on the albedo, the object name, and so on."""
@@ -1257,7 +1266,8 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
             if alpha_socket and len(alpha_socket.links) == 0 and 'Alpha' in img_node.outputs:
                 links.new(img_node.outputs['Alpha'], alpha_socket)
         # But if after those steps we didn't hook up any alpha, don't set it to Blended, since that will cause sorting issues.
-        if not alpha_socket or len(alpha_socket.links) == 0:
+        transparent_edges = shader_node.inputs.get('Transparent Edges')
+        if not alpha_socket or len(alpha_socket.links) == 0 and not (transparent_edges and transparent_edges.default_value==True):
             material.surface_render_method = 'DITHERED'
 
     first_plugged_img = next((s.links[0].from_node for s in shader_node.inputs if len(s.links)>0 and s.links[0].from_node.type == 'TEX_IMAGE'), None)

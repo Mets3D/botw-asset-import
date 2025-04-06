@@ -1086,9 +1086,11 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
     else:
         shader_name = "BotW: Smooth Shade"
 
-    if "eye" in lc_obname or "eye" in material['import_name'].lower() and "mask" not in lc_obname and "ravio" not in lc_assetname:
+    if get_shader_prop_of_mat(material, 'shaderassign>samplers>_a0') == '_fx0':
+        shader_name = "BotW: Ancient Weapon Blade"
+    elif "eye" in lc_obname or "eye" in material['import_name'].lower() and "mask" not in lc_obname and "ravio" not in lc_assetname:
         shader_name = "BotW: Eye"
-    if "arrow" in lc_dirname:
+    elif "arrow" in lc_dirname:
         if lc_dirname.endswith("_a"):
             # arrow bundles.
             if "Stone" in collection['dirname'] + obj['import_name']:
@@ -1099,12 +1101,6 @@ def guess_shader_and_textures(collection, obj, material, socket_map: OrderedDict
             guessed_textures = [img for img in guessed_textures if "stone" in img.name.lower()]
         else:
             guessed_textures = [img for img in guessed_textures if ("stone" not in img.name.lower()) and ("_A_" not in img.name)]
-    if any(["Blade_Fx" in img.name or "Shield_Fx" in img.name for img in all_textures]):
-        if "blade" or "shield" in lc_matname:
-            shader_name = "BotW: Ancient Weapon Blade"
-            guessed_textures = [img for img in guessed_textures if "Blade_Fx" in img.name or "Shield_Fx" in img.name]
-        else:
-            guessed_textures = [img for img in guessed_textures if "Blade_Fx" not in img.name or "Shield_Fx" in img.name]
     elif any(["EmmMsk.1" in img.name for img in all_textures]) and not any([word in material['import_name'].lower() for word in ('handle', '_02')]):
         shader_name = "BotW: Elemental Weapon"
     elif any(["Emm_Emm" in img.name for img in all_textures]) and 'Divine' in collection['asset_name']:
@@ -1327,7 +1323,7 @@ def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
         return "Emission Scroll"
     elif "_emm" in lc_img_name:
         return "Emission Mask"
-    elif "blade_fx" in lc_img_name or "shield_fx" in lc_img_name:
+    elif shader_name == 'BotW: Ancient Weapon Blade' and "_fx" in lc_img_name:
         return "Fx Texture"
     elif "_mtl" in lc_img_name:
         return "Metallic"
@@ -1502,6 +1498,8 @@ def texture_uses_first_uvmap(material, img) -> bool or None:
     if not tex_data:
         return True
     tex_idx = tex_data['textureUnit'] - 1
+    if tex_data['SamplerName'] == "_fx0":
+        return True
 
     # There are a number of values here that sound relevant but I can't find solid correlations, as usual.
 

@@ -197,9 +197,6 @@ def get_image_path(image_name: str) -> str:
 def print_later(*msg):
     PRINT_LATER.append("".join([str(m) for m in msg]))
 
-def camel_to_spaces(str):
-    return re.sub(r'(?<!^)(?=[A-Z])', ' ', str)
-
 class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     """Import all .dae & .fbx files from a selected folder recursively"""
     bl_idname = "import_scene.botw_dae_fbx"
@@ -207,13 +204,11 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     bl_options = {'REGISTER', 'UNDO'}
 
     directory: StringProperty(subtype='FILE_PATH', options={'SKIP_SAVE', 'HIDDEN'})
-    rename_known_assets: BoolProperty(name="Rename Known Assets", description="If an asset's name is found in the asset name map, rename it to that", default=True)
-    rename_unknown_assets: BoolProperty(name="Rename Unknown Assets", description="If an asset's name isn't found in the asset name map, rename it to title case and remove some prefixes", default=True)
 
-    rename_prepend: BoolProperty(name="Prepend Asset to Object Names", description="Prepend asset name to object and material names. Useful when importing many assets into a single file to keep names unique, but can also result in exceeding the 63-character limit. Those cases will be skipped (not renamed)", default=True)
-    rename_clean_names: BoolProperty(name="Clean Object & Material Names", description="", default=True)
+    rename_collections: BoolProperty(name="Rename Collections", description="Rename collections to their asset name.", default=True)
+    rename_ob_mat: BoolProperty(name="Rename Objects & Materials", description="Prepend asset name to object and material names, and remove garbage strings. Useful when importing many assets into a single file to keep names unique, but can also result in exceeding the 63-character limit (those cases will not be renamed.).", default=True)
 
-    apply_transforms: BoolProperty(name="Apply Transforms", description="Objects import with correct transforms, but in some cases they are not their default transforms. This should probably only be disabled if you're a modder and you plan to export this back into the game. Applying transforms is also necessary for wind shader effects to work", default=True)
+    apply_transforms: BoolProperty(name="Apply Transforms", description="Necessary for wind shader effects to work, and in some cases also necessary for correct armature replacement from .fbx files if you have them.", default=True)
     remove_redundant_armatures: BoolProperty(name="Remove Redundant Armatures", description="If an armature has only 1 bone and it's at the world origin, or if it doesn't deform any objects with any of its bones, remove it", default=True)
     remove_redundant_UVs: BoolProperty(name="Remove Redundant UVs", description="If a UVMap is the same as a previous one, or if it's empty, remove it", default=True)
 
@@ -225,11 +220,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
 
     def draw(self, context):
         layout = self.layout
-        layout.prop(self, 'rename_known_assets')
-        if self.rename_known_assets:
-            layout.prop(self, 'rename_unknown_assets')
-        layout.prop(self, 'rename_prepend')
-        layout.prop(self, 'rename_clean_names')
+        layout.prop(self, 'rename_collections')
+        layout.prop(self, 'rename_ob_mat')
         layout.separator()
 
         layout.prop(self, 'create_parent_collections')
@@ -258,8 +250,6 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         # Ensure dependent settings aren't enabled without their dependency.
         if not self.apply_transforms:
             self.remove_redundant_armatures = False
-        if not self.rename_known_assets:
-            self.rename_unknown_assets = False
 
         with Timer("Load caches"):
             ensure_caches(self.force_update_caches)
@@ -274,7 +264,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             dae_files = [f for f in files if f.lower().endswith(".dae") and "Fxmdl" not in f]
             parent_coll = None
             dirname = root.split(os.sep)[-1]
-            if dirname.endswith("_Far"):
+            if dirname.endswith("_Far") or dirname.endswith("_Animation"):
                 # These are LOD meshes, we don't want those.
                 continue
             if len(dae_files) > 1 and self.create_parent_collections:
@@ -282,26 +272,23 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                 if root_dir_name != parent_coll_name:
                     parent_coll_name = asset_names.get(parent_coll_name, parent_coll_name)
                     parent_coll = ensure_collection(context, parent_coll_name)
-            for dae_name in dae_files:
-                asset_name = dae_name.replace(".dae", "")
-                if self.rename_known_assets:
-                    asset_name = derive_asset_name(dae_name, dirname, len(dae_files)==1, remove_prefixes=self.rename_unknown_assets)
 
-                if 'Animation' in asset_name:
-                    continue
+            for dae_name in dae_files:
+
                 full_path = os.path.join(root, dae_name)
                 with Timer("Full Import", dae_name):
-                    imported_objects += import_and_process_dae(
+                    imported_coll = import_and_process_dae(
                         context, 
                         full_path, 
-                        asset_name, 
                         parent_coll, 
-                        uniqify_names=self.rename_prepend, 
-                        clean_names=self.rename_clean_names,
+                        rename_objects=self.rename_ob_mat, 
                         apply_transforms=self.apply_transforms,
                         remove_redundant_armatures=self.remove_redundant_armatures,
                         remove_redundant_UVs=self.remove_redundant_UVs,
                     )
+                    imported_objects += imported_coll.all_objects
+                    if self.rename_collections:
+                        imported_coll.name = imported_coll['asset_name']
             counter += 1
 
         for lateprint in PRINT_LATER:
@@ -318,18 +305,13 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
 
         return {'FINISHED'}
 
-def derive_asset_name(dae_filename: str, dirname: str, is_single_file: bool, remove_prefixes=True) -> str:
+def derive_asset_name(dae_filename: str, dirname: str, remove_prefixes=True) -> str:
     without_ext = dae_filename.replace(".dae", "")
     asset_name = asset_names.get(without_ext, without_ext)
 
     # If the asset name wasn't in the dictionary, try without any _A, _B suffixes.
     if asset_name == without_ext and (without_ext.endswith("_A") or without_ext.endswith("_B")):
         asset_name = asset_names.get(without_ext[:-2], without_ext[:-2])
-
-    # If an asset directory only has one .dae file and its name wasn't in the asset dictionary, 
-    # try the directory's name instead.
-    if asset_name == without_ext and is_single_file:
-        asset_name = asset_names.get(dirname, asset_name)
 
     # Guess Weapon sheaths based on the entries for weapons in the dictionary.
     for find, replace in (("Lsheath", "Lsword"), ("SpearSheath", "Spear"), ("Sheath", "Sword")):
@@ -346,17 +328,7 @@ def derive_asset_name(dae_filename: str, dirname: str, is_single_file: bool, rem
     if not remove_prefixes:
         return asset_name
 
-    # Most "Obj_" prefix meshes won't be in the dictionary, since they don't have any in-game strings 
-    # that are exposed to the player. (non-cel shaded environment meshes)
-    # So to avoid having to add all of these to the dictionary, just do some string operations.
-    for prefix in OBJ_PREFIXES:
-        if asset_name.startswith(prefix):
-            asset_name = asset_name[len(prefix):]
-
-    asset_name = asset_name.replace("D L C", "DLC")
-    asset_name = camel_to_spaces(asset_name.replace("_", " ")).replace("  ", " ")
-
-    return asset_name
+    return tidy_name(asset_name)
 
 def ensure_botw_scene_settings(context):
     # Zelda shaders absolutely depend on EEVEE.
@@ -364,6 +336,11 @@ def ensure_botw_scene_settings(context):
 
     # Set sRGB view transform, as that's what the game probably uses.
     context.scene.view_settings.view_transform = 'Standard'
+
+    # Set some settings that make things prettier. (and more expensive of course)
+    context.scene.eevee.use_shadow_jitter_viewport = True
+    context.scene.eevee.use_raytracing = True
+    context.scene.eevee.ray_tracing_options.resolution_scale = '16'
 
     if context.scene.world:
         context.scene.world.use_fake_user = True
@@ -423,24 +400,24 @@ def ensure_world_and_lights(context) -> bpy.types.World:
 def import_and_process_dae(
         context, 
         full_path: str, 
-        asset_name: str=None, 
         parent_coll=None, 
-        rename_coll=True, 
-        uniqify_names=False, 
-        clean_names=True,
+        rename_objects=False, 
         apply_transforms=True,
         remove_redundant_armatures=True,
         remove_redundant_UVs=True,
-    ) -> list[bpy.types.Object]:
+    ) -> bpy.types.Collection:
     dae_filename = os.path.basename(full_path)
-    asset_name = asset_name or os.path.splitext(dae_filename)[0]
+    dirname = os.path.basename(os.path.dirname(full_path))
+
+    asset_name = dae_filename.replace(".dae", "")
+    asset_name = derive_asset_name(dae_filename, dirname)
     dirname = os.path.basename(os.path.dirname(full_path))
 
     prefs = get_addon_prefs()
 
     # Create the collection and set it as active so all the objects get imported there to begin with.
     noext_filename = dae_filename.replace(".dae", "")
-    coll_name = asset_name if rename_coll else noext_filename
+    coll_name = noext_filename
     collection = ensure_collection(context, coll_name, parent=parent_coll)
     collection.asset_mark()
     collection['dirname'] = dirname
@@ -450,7 +427,14 @@ def import_and_process_dae(
 
     with Timer("Import .dae + .fbx", asset_name):
         objs = import_dae(context, full_path, discard_types=('EMPTY'), apply_transforms=apply_transforms)
-        objs = import_and_merge_fbx_armature(context, dae_objs=objs, dae_path=full_path, asset_name=asset_name, apply_transforms=apply_transforms)
+        rig_name = "RIG-"+asset_name if rename_objects else ""
+        objs = import_and_merge_fbx_armature(
+            context,
+            dae_objs=objs,
+            dae_path=full_path,
+            rig_name=rig_name,
+            apply_transforms=apply_transforms
+        )
     if not objs:
         return []
 
@@ -465,32 +449,26 @@ def import_and_process_dae(
             with context.temp_override(**override):
                 bpy.ops.ed.lib_id_load_custom_preview(filepath=icon_filepath)
 
-    ret_objs = []
     for obj in objs:
         obj = process_object(
             collection, 
             obj, 
-            asset_name=asset_name, 
-            uniqify_names=uniqify_names, 
-            clean_names=clean_names, 
+            rename_ob_mat=rename_objects, 
             remove_redundant_armatures=remove_redundant_armatures,
             remove_redundant_UVs=remove_redundant_UVs,
         )
         if obj:
-            ret_objs.append(obj)
             hide_obj_if_useless(obj)
             if apply_transforms:
                 hack_zfighting_leaves(collection, obj)
 
-    return ret_objs
+    return collection
 
 def process_object(
         collection, 
         obj, 
         *,
-        asset_name, 
-        uniqify_names=False, 
-        clean_names=True, 
+        rename_ob_mat=False, 
         remove_redundant_armatures=True,
         remove_redundant_UVs=True,
     ):
@@ -501,15 +479,13 @@ def process_object(
             bpy.data.objects.remove(obj)
             return
     elif obj.type == 'MESH':
-        if clean_names:
-            rename_object(obj)
-
-        if uniqify_names:
-            new_name = asset_name + "_" + obj.name
+        if rename_ob_mat:
+            new_name = tidy_name(obj.name)
+            new_name = collection['asset_name'] + "_" + new_name
             if len(new_name) < 64:
                 obj.name = new_name
             else:
-                # This will happen often if `rename_unknown_assets==False` but `rename_ob_mat_unique==True`.
+                # This will happen often if `rename_collections==False` but `rename_ob_mat_unique==True`.
                 # That's just not a recommended combination of settings.
                 print_later("Couldn't rename due to 63-char limit: ", obj.name, new_name)
 
@@ -548,11 +524,11 @@ def process_object(
                 print_later(f"Couldn't find material .json: {json_mat_name}")
 
             new_name = mat.name
-            if "Mt_" in mat.name and clean_names:
-                new_name = mat.name.split("Mt_")[1]
 
-            if uniqify_names:
-                new_name = asset_name + ": " + new_name
+            if rename_ob_mat:
+                if "Mt_" in mat.name:
+                    new_name = mat.name.split("Mt_")[1]
+                new_name = collection['asset_name'] + ": " + new_name
                 if new_name != mat.name and new_name in bpy.data.materials:
                     # If the material with this name already exists, overwrite it.
                     # Since material names are unique, this should only happen when trying 
@@ -630,21 +606,32 @@ def rename_object(obj):
         print_later("Couldn't rename due to 63-char limit: ", obj.name, new_name)
 
 def tidy_name(name):
+    """This function is allowed to be fairly "destructive" in order to achieve a clean looking name,
+    even at the cost of uniqueness (eg. a lot of garbage names might get turned into the same clean name)
+    """
     trash = PRIMITIVE_NAMES + ["_Model", "_Root", "_lowpoly", "_low", "__abc", "_Mdl"]
     swap = {
+        "_": " ",
         "  " : " ",
-        "D L C" : "DLC"
+        "D L C" : "DLC",
     }
 
     new_name = name
 
-    for primitive in PRIMITIVE_NAMES:
-        if primitive in new_name:
-            new_name = new_name.split(primitive)[0]
+    if "_MT_" in new_name:
+        new_name = new_name.split("_MT_")[1]
 
     # Nuke certain strings
     for word in trash:
         new_name = new_name.replace(word, "")
+
+    # Remove some prefixes
+    for prefix in OBJ_PREFIXES:
+        if new_name.startswith(prefix):
+            new_name = new_name[len(prefix):]
+
+    # Change CamelCase to Title Case
+    new_name = re.sub(r'(?<!^)(?=[A-Z])', ' ', new_name)
 
     # Find and replace as per the `swap` dict
     for find, replace in swap.items():
@@ -665,9 +652,6 @@ def tidy_name(name):
     suffix_pattern = re.compile(r"_group\d*$")
     if suffix_pattern.search(new_name):
         new_name = suffix_pattern.sub("", new_name)
-
-    if "_MT_" in new_name:
-        new_name = new_name.split("_MT_")[1]
 
     if new_name.endswith("_"):
         new_name = new_name[:-1]
@@ -692,7 +676,7 @@ def hide_obj_if_useless(obj):
 
     obj.hide_viewport, obj.hide_render = hide, hide
 
-def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, asset_name, apply_transforms=True):
+def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, rig_name="", apply_transforms=True):
     """Replace the armature from the dae_objs list with one from an .fbx, if we can find one with the same name next to it."""
     dae_armatures = [ob for ob in dae_objs if ob.type=='ARMATURE']
     if not dae_armatures:
@@ -719,7 +703,8 @@ def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, asset_name, ap
     bpy.data.objects.remove(dae_arm)
 
     for fbx_arm in fbx_armatures:
-        fbx_arm.name = "RIG-"+asset_name
+        if rig_name:
+            fbx_arm.name = rig_name
         cleanup_fbx_armature(context, fbx_arm)
 
     ret_objs += fbx_armatures
@@ -1650,11 +1635,10 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
 
     # Hardcode some other values.
     if collection['asset_name'] == "Majora's Mask":
-        rubber, metal = True, False
-        if 'eye' in lc_matname:
-            set_socket_value(shader_node, 'Emission Color', [0.026384, 0.485653, 0.003931, 1.000000])
-        else:
-            set_socket_value(shader_node, 'Emission Color', [0.513624, 0.105036, 0.022513, 1.000000])
+        rubber, metal = False, False
+        set_socket_value(shader_node, 'Emission Strength', 1.0)
+        set_socket_value(shader_node, 'Fake Rimlights', 0.0)
+        set_socket_value(shader_node, 'Sketch Highlights Spread', 0.0)
     if 'ancient' in lc_assetname:
         set_socket_value(shader_node, 'Emission Color', [1.000000, 0.245151, 0.025910, 1.000000])
     if material['import_name'] in ('Mt_Lens', 'Mt_Glass'):

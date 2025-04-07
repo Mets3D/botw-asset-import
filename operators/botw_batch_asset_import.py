@@ -959,7 +959,11 @@ def guess_sockets_for_textures(material, textures, shader_name) -> OrderedDict[b
         elif type == 'Normal':
             socket_map[img] = "Normal Map"
         elif type == 'Emission':
-            socket_map[img] = "Emission Mask"
+            if "EmmMsk.1" in img.name:
+                # TODO: sampler type _e01 might be a better indicator than EmmMsk.1 in the name.
+                socket_map[img] = "Emission Scroll"
+            else:
+                socket_map[img] = "Emission Mask"
         elif type == 'AO':
             socket_map[img] = "AO"
         elif type == 'Metallic':
@@ -1008,9 +1012,6 @@ def guess_colorspace(material, img):
     return 'Non-Color'
 
 def guess_shader(collection, obj, material, all_textures):
-    lc_obname = obj.name.lower()
-    lc_assetname = (collection.get('asset_name') or "").lower()
-
     fallback_shader = "BotW: Cel Shade"
     for prefix in OBJ_PREFIXES:
         if collection['dirname'].startswith(prefix):
@@ -1018,23 +1019,21 @@ def guess_shader(collection, obj, material, all_textures):
             break
 
     if get_shader_prop_of_mat(material, 'shaderassign>options>uking_material_behave') == 104:
-        # NOTE: It's important that this comes before the Cel Shade check, since this is just a more specific version of that shader.
         return "BotW: Eye"
-
-    if (
-        get_shader_prop_of_mat(material, 'shaderassign>options>uking_texcoord_toon_spec_srt') == 3 # Strong correspondance to regular Cel shading. (not 100% perfect, eg. Link's earrings)
-        or get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair')==402 # This is the flag for hair Cel shading (3 cels instead of 2 in hair) (I think this is 100%)
-    ):
-        return "BotW: Cel Shade"
     if get_shader_prop_of_mat(material, 'shaderassign>samplers>_a0') == '_fx0':
         return "BotW: Ancient Weapon Blade"
-
     if any(["EmmMsk.1" in img.name for img in all_textures]) and not any([word in material['import_name'].lower() for word in ('handle', '_02')]):
         return "BotW: Elemental Weapon"
     if any(["Emm_Emm" in img.name for img in all_textures]) and 'Divine' in collection['asset_name']:
         return "BotW: Divine Eye"
     elif any(["clrmak" in img.name.lower() or "clrmsk" in img.name.lower() for img in all_textures]):
         return "BotW: Generic NPC"
+
+    if (
+        get_shader_prop_of_mat(material, 'shaderassign>options>uking_texcoord_toon_spec_srt') == 3 # Strong correspondance to regular Cel shading. (not 100% perfect, eg. Link's earrings) (NOTE: Make sure this is caught AFTER other, more specific types of Cel Shading!)
+        or get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair')==402 # This is the flag for hair Cel shading (3 cels instead of 2 in hair) (I think this is 100%)
+    ):
+        return "BotW: Cel Shade"
 
     albedo = next((img for img in all_textures if img.colorspace_settings.name=='sRGB'), None)
     if albedo:

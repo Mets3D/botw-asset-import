@@ -82,4 +82,6 @@ This project wouldn't have been possible without at least the following open sou
 - [bmubin](https://github.com/augmero/bmubin)
 - [seanim importer](https://github.com/SE2Dev/io_anim_seanim)
 - [Noesis](https://richwhitehouse.com/index.php?content=inc_projects.php&showproject=91)
-Furthermore, a big thank you to [thejudsub](https://www.youtube.com/watch?v=Sb3CRU2DufU) for his Blender shading tutorial series.
+Furthermore:
+- A big thank you to [thejudsub](https://www.youtube.com/watch?v=Sb3CRU2DufU) for his Blender shading tutorial series which inspired this whole project.
+- Thanks to [freestylized.com](https://freestylized.com/) for the sky texture I used (they have many more, really worth checking out!)

@@ -576,6 +576,34 @@ def hack_zfighting_leaves(collection, obj):
             obj.location.z = -0.025
             return
 
+def any_in_any(words, textures):
+    return any([any([word in texture for word in words]) for texture in textures])
+
+def is_water(material) -> bool:
+    textures = get_shader_prop_of_mat(material, 'TextureMaps')
+    if not textures:
+        return False
+
+    water_names = ['TerraWater', 'CmnTex_Water', 'DungeonWater', 'Water_HatenoDyeingShop']
+    if any_in_any(water_names, textures):
+        return True
+
+    not_water = ['Grass', 'Ibt', 'FairySpringWater', 'Grudge']
+    if any_in_any(not_water, textures):
+        return False
+
+    if any_in_any(['Water'], textures):
+        return True
+    
+    return False
+
+def is_waterfall(material) -> bool:
+    textures = get_shader_prop_of_mat(material, 'TextureMaps')
+    if not textures:
+        return False
+
+    return any_in_any(['CmnWaterFall'], textures)
+
 def is_armature_useful(arm_ob) -> bool:
     """Returns True if it deforms any of its child objects and consists of 
     more than just a deforming root bone at the origin."""
@@ -796,6 +824,17 @@ def process_material(collection, obj, material):
     Switch Toolbox, and included in this add-on inside materials.zip.
     """
 
+    if is_waterfall(material):
+        material.user_remap(ensure_lib_datablock('materials', "BotW Water"))
+        obj['flow_speed'] = -5 # Didn't put too much thought into water speed, this looks good nuf.
+        obj['flow_axis'] = 1.0
+        return
+    elif is_water(material):
+        material.user_remap(ensure_lib_datablock('materials', "BotW Water"))
+        obj['flow_speed'] = 0.75
+        obj['flow_axis'] = 0.0
+        return
+
     if any([s in material.name for s in GARBAGE_MATS]):
         # This is some sorta gameengine mesh, we don't care.
         obj.hide_viewport, obj.hide_render = True, True
@@ -824,7 +863,7 @@ def process_material(collection, obj, material):
         socket_map.update(more_textures)
     elif shader_name == 'BotW: Cel Shade':
         albedo = next((img for img, socket_name in socket_map.items() if socket_name=='Albedo'), None)
-        if albedo:
+        if albedo and "." in os.path.splitext(albedo.name)[0]:
             dye_textures = guess_dye_textures(albedo)
             socket_map.update([(tex, 'Albedo') for tex in dye_textures])
     shader_node = init_nodetree(material, shader_name)

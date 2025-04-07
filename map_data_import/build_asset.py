@@ -23,6 +23,8 @@ def main():
         bpy.ops.wm.save_as_mainfile(filepath=blend_path)
         bpy.ops.file.unpack_all(method='USE_LOCAL')
         bpy.ops.wm.save_as_mainfile(filepath=blend_path, compress=True)
+        # Change the library path to point at the resources.blend copy 
+        # that's in the asset folder, rather than the add-on's folder.
         for lib in bpy.data.libraries:
             if "resources.blend" in lib.filepath:
                 lib.filepath = "//resources.blend"

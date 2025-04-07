@@ -3,6 +3,7 @@ from bpy.props import BoolProperty
 from ..utils.collections import find_layer_collection_by_collection
 from mathutils import Vector
 from ..utils.timer import Timer
+from ..utils.resources import ensure_lib_datablock
 from ..ui.ui_asset_metadata import get_asset_library
 
 # TODO: support objects!
@@ -44,7 +45,7 @@ class ASSETBROWSER_OT_focus_asset(bpy.types.Operator):
                     # This is only if asset_library is None, which should never happen.
                     import_method = 'APPEND'
             link = import_method == 'LINK'
-            action = get_or_import_action(asset.name, asset.full_library_path, link=link)
+            action = ensure_lib_datablock('actions', asset.name, blend_path=asset.full_library_path, link=link)
 
         if action:
             result = focus_action(context, action, self.focus_view)
@@ -90,16 +91,6 @@ def focus_action(context, action, focus_view=True):
         focus_view_on_objects(context, rig.children_recursive)
 
     return {'FINISHED'}
-
-def get_or_import_action(action_name, library_path, link=False):
-    if action_name in bpy.data.actions:
-        return bpy.data.actions[action_name]
-
-    with bpy.data.libraries.load(library_path, relative=True, link=link) as (data_from, data_to):
-        if action_name in data_from.actions:
-            data_to.actions.append(action_name)
-
-    return bpy.data.actions.get(action_name)
 
 def focus_collections(context, collections, focus_view=True, operator=None):
     if not collections:

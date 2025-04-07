@@ -12,7 +12,7 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..databases.asset_names import asset_names
 from ..utils.collections import ensure_collection, set_active_collection
-from ..utils.widgets import ensure_widget, get_resources_blend_path
+from ..utils.resources import ensure_widget, ensure_lib_datablock, get_resources_blend_path
 from ..prefs import get_addon_prefs
 from ..utils.deduplicate_materials import deduplicate_materials, hash_material
 from ..utils.timer import Timer
@@ -405,22 +405,7 @@ def ensure_world_and_lights(context) -> bpy.types.World:
 
     Also de-duplicate resulting light objects and nested node trees.
     """
-    abs_path = get_resources_blend_path()
-    WORLD_NAME = "BotW Lights"
-    # Check if it already exists locally.
-    world = bpy.data.worlds.get(WORLD_NAME)
-    if world:
-        # World exists, so just return it.
-        return world
-
-    # Import World from resources.blend file.
-    with bpy.data.libraries.load(abs_path, link=False, relative=False) as (
-        data_from,
-        data_to,
-    ):
-        for world in data_from.worlds:
-            if world == WORLD_NAME:
-                data_to.worlds.append(world)
+    world = ensure_lib_datablock('worlds', "BotW Lights", link=False)
 
     # Ensure the lighting objects are linked to the scene and de-duplicated.
     for obj in bpy.data.objects[:]:
@@ -432,8 +417,7 @@ def ensure_world_and_lights(context) -> bpy.types.World:
                 obj = existing
             if obj not in set(context.scene.collection.all_objects):
                 context.scene.collection.objects.link(obj)
-    
-    world = bpy.data.worlds.get(WORLD_NAME)
+
     return world
 
 def import_and_process_dae(
@@ -1708,37 +1692,8 @@ def ensure_edge_attribute(context, object):
         bpy.ops.object.modifier_apply(modifier=gn_modifier.name)
 
 def ensure_nodetree(nodetree_name) -> bpy.types.NodeTree:
-    """Append node tree from resources.blend, unless they already exist in this file.
-    Also de-duplicate resulting light objects and nested node trees.
-    """
-    abs_path = get_resources_blend_path()
-    # Check if it already exists locally.
-    existing_nt = bpy.data.node_groups.get(nodetree_name)
-    if existing_nt:
-        # NodeTree exists, so just return it.
-        return existing_nt
-
-    # Import NodeTree from resources.blend file.
-    prefs = get_addon_prefs()
-    link = prefs.resource_append_mode=='LINK'
-    with bpy.data.libraries.load(abs_path, link=link, relative=True) as (
-        data_from,
-        data_to,
-    ):
-        for nt in data_from.node_groups:
-            if nt == nodetree_name:
-                data_to.node_groups.append(nt)
-
-    new_nt = bpy.data.node_groups.get(nodetree_name)
-
-    for nt in bpy.data.node_groups[:]:
-        if nt.name.startswith("BotW") and nt.name.endswith(".001"):
-            other = bpy.data.node_groups.get(nt.name[:-4])
-            if other:
-                nt.user_remap(other)
-                bpy.data.node_groups.remove(nt)
-
-    return new_nt
+    """Append or link the nodetree, depending on add-on preferences."""
+    return ensure_lib_datablock('node_groups', nodetree_name)
 
 def refresh_images():
     for m in bpy.data.materials:

@@ -9,7 +9,7 @@ module_names = (
     "pixel_image",
     "progressbar",
     "timer",
-    "widgets",
+    "resources",
     "mesh",
     "string",
 )

@@ -3,6 +3,7 @@ from bpy.props import StringProperty, EnumProperty, BoolProperty
 from mathutils import Matrix, Euler
 from math import radians
 from ..utils.collections import ensure_collection
+from ..utils.resources import ensure_lib_datablock
 from .build_asset_library import ALL_MAP_SECTIONS, BLEND_DIR, load_instance_database
 from collections import defaultdict
 
@@ -51,7 +52,8 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
         object_matrices = defaultdict(list)
         for is_dynamic, assets in zip((True, False), (dynamic_assets, static_assets)):
             for asset_name, data in assets.items():
-                coll_linked_asset = ensure_asset_collection(self.blend_dir, asset_name)
+                asset_blend = os.path.join(self.blend_dir, asset_name+".blend")
+                coll_linked_asset = ensure_lib_datablock('collections', asset_name, blend_path=asset_blend, link=True)
                 if not coll_linked_asset:
                     # NOTE: Could make an argument for creating these empties even if the asset is missing. 
                     # That way, a botcher import can be resumed later instead of starting from scratch. 
@@ -94,33 +96,6 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
 
         return {'FINISHED'}
 
-def ensure_asset_collection(blend_dir, asset_name) -> bpy.types.Collection or None:
-    """Link asset .blend to the file, without assigning it to the scene."""
-    abs_path = os.path.join(blend_dir, asset_name+".blend")
-
-    # Check if it already exists locally.
-    existing_coll = next((c for c in bpy.data.collections if c.name==asset_name and c.library), None)
-    if existing_coll:
-        # Collection exists, so just return it.
-        return existing_coll
-
-    if not os.path.isfile(abs_path):
-        return
-
-    # Link collection from asset .blend file.
-    with bpy.data.libraries.load(abs_path, link=True, relative=True) as (
-        data_from,
-        data_to,
-    ):
-        for coll in data_from.collections:
-            if coll == asset_name:
-                data_to.collections.append(coll)
-
-    new_coll = bpy.data.collections.get(asset_name)
-    if not new_coll:
-        return
-
-    return new_coll
 
 registry = [
     OBJECT_OT_botw_import_map_section,

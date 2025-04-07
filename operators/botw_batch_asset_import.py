@@ -830,14 +830,6 @@ def process_material(collection, obj, material):
         # This material was already processed, don't process it again as that might break stuff.
         return
 
-    for suf in "LR", "RL":
-        if material.name.endswith("Eyeball_"+suf[0]):
-            existing = bpy.data.materials.get(material.name.replace(suf[0], suf[1]))
-            if existing:
-                material.user_remap(existing)
-                existing.name = existing.name[:-2]
-                return
-
     textures = load_assigned_json_textures(material)
     shader_name = guess_shader(collection, obj, material, textures)
     socket_map = guess_sockets_for_textures(material, textures, shader_name)
@@ -1025,6 +1017,10 @@ def guess_shader(collection, obj, material, all_textures):
             fallback_shader = "BotW: Smooth Shade"
             break
 
+    if get_shader_prop_of_mat(material, 'shaderassign>options>uking_material_behave') == 104:
+        # NOTE: It's important that this comes before the Cel Shade check, since this is just a more specific version of that shader.
+        return "BotW: Eye"
+
     if (
         get_shader_prop_of_mat(material, 'shaderassign>options>uking_texcoord_toon_spec_srt') == 3 # Strong correspondance to regular Cel shading. (not 100% perfect, eg. Link's earrings)
         or get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair')==402 # This is the flag for hair Cel shading (3 cels instead of 2 in hair) (I think this is 100%)
@@ -1032,10 +1028,6 @@ def guess_shader(collection, obj, material, all_textures):
         return "BotW: Cel Shade"
     if get_shader_prop_of_mat(material, 'shaderassign>samplers>_a0') == '_fx0':
         return "BotW: Ancient Weapon Blade"
-
-    if "eye" in lc_obname or "eye" in material['import_name'].lower() and "mask" not in lc_obname and "ravio" not in lc_assetname:
-        # TODO: I'm almost sure we can find a consistent way to identify eye materials, just didn't get around to it yet.
-        return "BotW: Eye"
 
     if any(["EmmMsk.1" in img.name for img in all_textures]) and not any([word in material['import_name'].lower() for word in ('handle', '_02')]):
         return "BotW: Elemental Weapon"

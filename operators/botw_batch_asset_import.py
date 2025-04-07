@@ -358,9 +358,8 @@ def ensure_botw_scene_settings(context):
         bloom_node = nodes.new("CompositorNodeGlare")
         bloom_node.glare_type = 'BLOOM'
         bloom_node.quality = 'HIGH'
-        bloom_node.mix = -0.34
-        bloom_node.threshold = 1.28
-        bloom_node.size = 6
+        bloom_node.inputs['Size'].default_value = 0.15
+        bloom_node.inputs['Strength'].default_value = 2.0
         links.new(previous_socket, bloom_node.inputs['Image'])
         links.new(bloom_node.outputs['Image'], output_node.inputs['Image'])
 

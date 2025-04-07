@@ -1,4 +1,3 @@
-- Fix glare compositing
 - Make sure Eevee is as pretty as can be (refraction?)
 
 Importer feature ideas:

@@ -53,12 +53,10 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
         for is_dynamic, assets in zip((True, False), (dynamic_assets, static_assets)):
             for asset_name, data in assets.items():
                 asset_blend = os.path.join(self.blend_dir, asset_name+".blend")
-                coll_linked_asset = ensure_lib_datablock('collections', asset_name, blend_path=asset_blend, link=True)
+                coll_linked_asset = None
+                if os.path.isfile(asset_blend):
+                    coll_linked_asset = ensure_lib_datablock('collections', asset_name, blend_path=asset_blend, link=True)
                 if not coll_linked_asset:
-                    # NOTE: Could make an argument for creating these empties even if the asset is missing. 
-                    # That way, a botcher import can be resumed later instead of starting from scratch. 
-                    # But I think this will be quick anyways.
-                    print(f"Missing asset file: {asset_name}")
                     coll_missing = ensure_collection(context, self.map_section + " Missing Assets", coll_root)
                     coll_asset = ensure_collection(context, asset_name, coll_missing)
                 else:

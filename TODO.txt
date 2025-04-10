@@ -1,5 +1,3 @@
-- Make sure Eevee is as pretty as can be (refraction?)
-
 Importer feature ideas:
     - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece. Could be fun to store and add related functionality to the BlankFile.blend scripts.
 
@@ -7,8 +5,9 @@ Map Importer TODOs:
     - Organize Far objects, Enemies, NPCs, Animals into separate collections so they can be disabled easily.
 
     Terrain
-        - I'm not sure if I can trust bmubin's map_data that was generated because the file names don't align with the game's files. For example, 5100000001 doesn't exist in the game files, only bmubin afaict.
-        - Ice-spear's terrain visualization looks pretty good, although I didn't compare it to in-game. But looking at its source code could be useful.
+        - I started trying to refactor bmubin
+            - We always loop over the whole grid, but skip certain blocks depending on what's returned by lod_ignore(), and I'd like to change that function to allow us to define a starting point and a size, rather than a point and a radius.
+        - Material blending is described here pretty well, although UV mapping is not clear: https://zeldamods.org/wiki/MATE
 
 Asset pack release:
     - Need to re-do Obj_Objects because a bunch of objects have no textures assigned for some reason.

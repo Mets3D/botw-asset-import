@@ -579,6 +579,14 @@ def is_waterfall(material) -> bool:
 
     return any_in_any(['CmnWaterFall'], textures)
 
+def is_lava(material) -> bool:
+    textures = get_shader_prop_of_mat(material, 'TextureMaps')
+    if not textures:
+        return False
+
+    lava_names = ['CmnTex_Lava_Alb']
+    return any_in_any(lava_names, textures)
+
 def is_armature_useful(arm_ob) -> bool:
     """Returns True if it deforms any of its child objects and consists of 
     more than just a deforming root bone at the origin."""
@@ -809,15 +817,20 @@ def process_material(collection, obj, material):
     """
 
     if is_waterfall(material):
-        material.user_remap(ensure_lib_datablock('materials', "BotW Water"))
-        obj['flow_speed'] = -5 # Didn't put too much thought into water speed, this looks good nuf.
-        obj['flow_axis'] = 1.0
+        water = ensure_lib_datablock('materials', "BotW Water")
+        material.user_remap(water)
+        set_socket_value(water.node_tree.nodes['Main Shader'], "Speed", -5)
+        set_socket_value(water.node_tree.nodes['Main Shader'], "Axis Y/X", 1.0)
         return
     elif is_water(material):
+        water = ensure_lib_datablock('materials', "BotW Water")
         material.user_remap(ensure_lib_datablock('materials', "BotW Water"))
-        obj['flow_speed'] = 0.75
-        obj['flow_axis'] = 0.0
+        set_socket_value(water.node_tree.nodes['Main Shader'], "Speed", 0.75)
+        set_socket_value(water.node_tree.nodes['Main Shader'], "Axis Y/X", 0.0)
         return
+    elif is_lava(material):
+        lava = ensure_lib_datablock('materials', "BotW Lava")
+        material.user_remap(lava)
 
     if any([s in material.name for s in GARBAGE_MATS]):
         # This is some sorta gameengine mesh, we don't care.

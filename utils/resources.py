@@ -23,8 +23,8 @@ def ensure_lib_datablock(container_name, name, blend_path="", link=None) -> ID:
     assert os.path.isfile(abs_path), "File not found: "+blend_path
 
     # Check if it already exists.
-    lib = next((lib.filepath for lib in bpy.data.libraries if lib.filepath.endswith(RESOURCES_BLEND)), None) if link else None
-    pre_existing_datablock = container.get((name, lib))
+    lib_path = next((lib.filepath for lib in bpy.data.libraries if os.path.abspath(bpy.path.abspath(lib.filepath)) == abs_path), None) if link else None
+    pre_existing_datablock = container.get((name, lib_path))
     if pre_existing_datablock:
         # Datablock exists and we don't want to overwrite it, so just return it.
         return pre_existing_datablock
@@ -39,12 +39,11 @@ def ensure_lib_datablock(container_name, name, blend_path="", link=None) -> ID:
         for o in container_from:
             if o == name:
                 container_to.append(o)
-                print("Loaded this thing: ", o)
 
-    lib = next((lib.filepath for lib in bpy.data.libraries if os.path.abspath(bpy.path.abspath(lib.filepath)) == abs_path), None) if link else None
-    new_datablock = container.get((name, lib))
+    lib_path = next((lib.filepath for lib in bpy.data.libraries if os.path.abspath(bpy.path.abspath(lib.filepath)) == abs_path), None) if link else None
+    new_datablock = container.get((name, lib_path))
 
-    assert new_datablock, f"Datablock {name} not found in {container} in {abs_path}."
+    assert new_datablock, f"Datablock {name} not found in {container} in {abs_path} ({abs_path} != {lib_path})."
 
     return new_datablock
 

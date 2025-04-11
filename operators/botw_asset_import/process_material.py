@@ -694,7 +694,7 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         rubber, metal = False, False
         set_socket_value(shader_node, 'Emission Strength', 1.0)
         set_socket_value(shader_node, 'Fake Rimlights', 0.0)
-        set_socket_value(shader_node, 'Sketch Highlights Spread', 0.0)
+        set_socket_value(shader_node, 'Sketch Highlight Spread', 0.0)
     if 'ancient' in lc_assetname:
         set_socket_value(shader_node, 'Emission Color', [1.000000, 0.245151, 0.025910, 1.000000])
     if material['import_name'] in ('Mt_Lens', 'Mt_Glass'):

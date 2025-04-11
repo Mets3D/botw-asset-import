@@ -17,7 +17,7 @@ def deduplicate_materials(objects):
                 if len(mat.node_tree.nodes) < 3:
                     print("Fewer than 3 nodes. Won't de-duplicate.")
                     continue
-                mat.user_remap(mat_hashes[mat_hash])
+                # mat.user_remap(mat_hashes[mat_hash])
                 if mat_hash not in copy_counter:
                     copy_counter[mat_hash] = 0
                 copy_counter[mat_hash] += 1
@@ -34,7 +34,9 @@ def hash_material(material) -> str:
     out_node = next((n for n in material.node_tree.nodes if n.type == 'OUTPUT_MATERIAL'), None)
     assert out_node, "There must be a material output node for hashing: " + material.name
 
-    return hashlib.md5(node_inputs_to_hashable(out_node).encode("utf-8")).hexdigest()
+    mat_str = node_inputs_to_hashable(out_node)
+    return hashlib.md5(mat_str.encode("utf-8")).hexdigest()
+
 
 def node_inputs_to_hashable(node) -> str:
     """Recursively collect some data towards the left of the node-tree, 
@@ -56,11 +58,22 @@ def node_inputs_to_hashable(node) -> str:
     for in_socket in node.inputs:
         if hasattr(in_socket, 'default_value'):
             # Shader sockets don't have a default_value.
-            str_data += in_socket.name + str(in_socket.default_value)
+            str_data += in_socket.name + get_socket_value_str(in_socket)
         for link in in_socket.links:
             str_data += "->" + node_inputs_to_hashable(link.from_node)
+    for out_socket in node.outputs:
+        if len(out_socket.links) == 0 and hasattr(out_socket, 'default_value'):
+            str_data += out_socket.name + get_socket_value_str(out_socket)
 
     return str_data
+
+def get_socket_value_str(socket):
+    value = socket.default_value
+    try:
+        value = list(socket.default_value)
+    except:
+        pass
+    return str(value)
 
 def refresh_images():
     for m in bpy.data.materials:

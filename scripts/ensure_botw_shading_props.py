@@ -1,3 +1,7 @@
+# NOTE: This script is outdated and does not create all the properties that currently exist on the world in resources.blend. There was no point in continuing to maintain this script. 
+# If you want to use your own world, just copy paste your world nodes into the "BotW Lights" world.
+# TODO: probably remove this script from the repo and document the fact that you need to copy paste your world nodes.
+
 import bpy
 
 # Driving shader node properties directly is a massive hit on performance.

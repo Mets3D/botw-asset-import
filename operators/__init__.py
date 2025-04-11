@@ -1,5 +1,5 @@
 module_names = (
-    "botw_batch_asset_import",
+    "botw_asset_import",
     "botw_batch_seanim_import",
     "botw_file_cleanup",
     "actions_merge",

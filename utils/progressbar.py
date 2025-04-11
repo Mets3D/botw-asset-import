@@ -3,6 +3,12 @@ import bpy
 from bpy.props import IntProperty, StringProperty
 
 class ProgressBar:
+    """This class tries to implement a UI progress bar. 
+    This needs to be wrapped by a modal operator which is capable of being split up to a sequence of smaller tasks,
+    because the blender UI can only refresh itself inbetween modal operator steps.
+    But such an operator seems to stop processing when there is no input, eg. if user alt-tabs or just doesn't move their mouse.
+    So this is unfortunately a bit useless in the end. :(
+    """
     instances = []
 
     @staticmethod

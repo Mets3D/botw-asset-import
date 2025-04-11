@@ -5,7 +5,7 @@ module_names = (
     "catalogs",
     "collections",
     "dae_fixer",
-    "deduplicate_materials",
+    "material",
     "pixel_image",
     "progressbar",
     "timer",

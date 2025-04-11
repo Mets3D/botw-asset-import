@@ -1,7 +1,7 @@
 import bpy, os
 from .asset_focus import focus_action, focus_collections
 from bpy.props import BoolProperty
-from .botw_batch_asset_import import PixelImage
+from ..utils.pixel_image import PixelImage
 from ..utils.progressbar import ProgressBar
 from ..utils.timer import Timer
 

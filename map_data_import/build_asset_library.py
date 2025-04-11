@@ -5,7 +5,7 @@ import pickle
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import shared_memory
 
-from ..operators.botw_batch_asset_import import ensure_caches
+from ..operators.botw_asset_import.constants import ensure_caches
 from ..prefs import get_addon_prefs
 
 # TODO: Move this to the preferences or derive from existing preferences

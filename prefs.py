@@ -1,4 +1,4 @@
-import bpy
+import bpy, os
 from bpy.types import AddonPreferences
 from bpy.props import StringProperty, EnumProperty
 from . import __package__ as base_package
@@ -51,5 +51,12 @@ def get_addon_prefs(context=None):
         return context.preferences.addons[base_package].preferences
     else:
         return context.preferences.addons[base_package.split(".")[0]].preferences
+
+def get_models_folder(context=None):
+    prefs = get_addon_prefs(context)
+    models_dir = prefs.game_models_folder
+    if not os.path.exists(models_dir):
+        raise FileNotFoundError("Models Folder must be specified in the add-on's preferences. Read the tooltip!")
+    return models_dir
 
 registry = [BotWImportPreferences]

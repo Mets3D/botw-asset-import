@@ -1,4 +1,4 @@
-import hashlib
+import bpy, hashlib
 
 def deduplicate_materials(objects):
     """Crunch relevant data into a hash, then user remap if this hash already existed."""
@@ -61,3 +61,11 @@ def node_inputs_to_hashable(node) -> str:
             str_data += "->" + node_inputs_to_hashable(link.from_node)
 
     return str_data
+
+def refresh_images():
+    for m in bpy.data.materials:
+        if not m.node_tree:
+            continue
+        for n in m.node_tree.nodes:
+            if n.type == 'TEX_IMAGE':
+                n.image = n.image

@@ -4,7 +4,7 @@ from bpy.props import BoolProperty
 from mathutils import Euler
 from math import pi
 
-from .botw_batch_asset_import import get_albedo_img_node
+from .botw_asset_import.process_material import get_albedo_img_node
 from .botw_batch_seanim_import import rename_actions
 from ..databases.asset_names import asset_names
 

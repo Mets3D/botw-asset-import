@@ -1,3 +1,6 @@
+# This script generated the texture_info.json found in this repo. 
+# This accelerates the import process by not having to read the pixel data of images to determine what kind of color channels they have.
+
 import glob, os, bpy, json
 from bl_ext.MyExtensionsLaptop.botw_asset_import.utils.pixel_image import PixelImage
 

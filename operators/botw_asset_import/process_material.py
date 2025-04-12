@@ -827,21 +827,6 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
             img_node.label = "No socket: " + socket_name
             continue
 
-        # # Bit of a hack, re-direct Material Blend socket names that need to know the shader type. 
-        # if shader_node.node_tree.name == 'BotW: Material Blend':
-        #     # This shader blends up to 3 materials together.
-        #     if len(shader_socket.links) > 0:
-        #         if socket_name == 'Albedo':
-        #             socket_name = 'Albedo Blend 1'
-        #         elif socket_name == 'Normal Map':
-        #             socket_name = 'Normal Blend 1'
-        #         elif socket_name == 'Albedo Blend 1':
-        #             socket_name = 'Albedo Blend 2'
-        #         elif socket_name == 'Normal Blend 1':
-        #             socket_name = 'Normal Blend 2'
-        #         shader_socket = shader_node.inputs.get(socket_name)
-        #         img_node.label = socket_name + " " + img_node.label
-
         if socket_name == "Albedo Blend 1":
             set_socket_value(shader_node, f"Blend 1 Factor", 1)
 

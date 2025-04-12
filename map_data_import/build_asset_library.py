@@ -21,6 +21,65 @@ DEFAULT_BLEND = os.path.join(THIS_FOLDER, "asset_blank_file.blend")
 BLENDER = os.path.abspath(sys.argv[0])
 
 ALL_MAP_SECTIONS = [f"{letter}-{number}" for letter in "ABCDEFGHIJ" for number in range(1, 9)]
+MAP_SECTION_NAMES = {
+    'A-4': "Statue of 8th",
+    'A-8': "Gerudo Great Skeleton",
+    'B-2': "Flight Range",
+    'B-3': "Rito Village",
+    'B-7': "Gerudo Town",
+    'C-4': "Tabantha Stable",
+    'C-7': "Canyon Stable",
+    'D-2': "Snowfield Stable",
+    'D-3': "Serene Stable",
+    'D-8': "South Labyrinth",
+    'E-1': "North Labyrinth",
+    'E-2': "Korok Forest",
+    'E-3': "Hyrule Castle",
+    'E-4': "Hyrule Castle",
+    'E-6': "Forest of Time",
+    'E-7': "Hylia Island",
+    'F-2': "Korok Forest",
+    'F-3': "Korok Forest",
+    'F-5': "Wetland Stable",
+    'F-6': "Riverside Stable",
+    'F-7': "Spring of Courage",
+    'F-8': "Highland Stable",
+    'G-2': "Goron City",
+    'G-3': "Woodland Stable",
+    'G-6': "Dueling Peaks",
+    'G-8': "Lakeside Stable",
+    'H-1': "Gut Check Rock",
+    'H-2': "Death Mountain",
+    'H-3': "Foothill Stable",
+    'H-4': "Zora River",
+    'H-8': "Lurelin Village",
+    'I-1': "Skill Lake",
+    'I-2': "Spring of Power",
+    'I-3': "Tarrey Town",
+    'I-4': "Zora's Domain",
+    'I-6': "Spring of Wisdom",
+    'I-7': "Hateno Village",
+    'I-8': "Lurelin Village",
+    'J-1': "Akkala Tech Lab",
+    'J-2': "East Akkala Stable",
+    'J-3': "Tarrey Town",
+    'J-8': "Eventide Island",
+}
+
+def map_section_enum_items():
+    enum_items = []
+    for identifier in ALL_MAP_SECTIONS:
+        name = MAP_SECTION_NAMES.get(identifier)
+        if name:
+            name = identifier + ": " + name
+        else:
+            name = identifier
+        enum_items.append((identifier, name, name))
+    # Add separators.
+    for i, _ in reversed(list(enumerate(enum_items))):
+        if (i + 1) % 8 == 0:
+            enum_items.insert(i + 1, None)
+    return enum_items
 
 class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
     """Build asset cache one .blend per asset for importing bmubin's map data"""
@@ -73,8 +132,9 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         description="Which assets of the game to import. Either the whole game, only those found in the map, or only those found in a chunk of the map",
         items=[
             ("GAME", "Whole Game", "All assets in the game"), 
-            ("MAP_ALL", "Whole Map", "All assets used in the map")
-        ] + [(s, s, "Map Section "+s) for s in ALL_MAP_SECTIONS],
+            ("MAP_ALL", "Whole Map", "All assets used in the map"),
+            None,
+        ] + map_section_enum_items(),
         default="B-7",
         update=count_dae,
     )

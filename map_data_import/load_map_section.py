@@ -4,7 +4,7 @@ from mathutils import Matrix, Euler
 from math import radians
 from collections import defaultdict
 
-from .build_asset_library import ALL_MAP_SECTIONS, BLEND_DIR, load_instance_database
+from .build_asset_library import map_section_enum_items, BLEND_DIR, load_instance_database
 from ..operators.botw_asset_import.prepare_scene import ensure_botw_scene_settings
 from ..utils.customprop import copy_property
 from ..utils.collections import ensure_collection
@@ -25,7 +25,7 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
     map_section: EnumProperty(
         name="Map Section", 
         description="Section of the map to import",
-        items=[(s, s, "Map Section "+s) for s in ALL_MAP_SECTIONS],
+        items=map_section_enum_items(),
         default="B-7",
     )
     ignore_duplicates: BoolProperty(

@@ -1017,7 +1017,9 @@ def load_assigned_json_textures(material) -> list[bpy.types.Image]:
     for name, tex_data in texture_maps.items():
         if name in ('MaterialAlb', 'MaterialCmb', 'ForReplace_Lumberjack'):
             continue
-        img = ensure_loaded_img(name)
+        # NOTE: allow_missing=True because there is actually a very small number of textures referenced by materials that just... don't exist.
+        # Eg. Armor_181_Head references an Emm_Nrm texture.
+        img = ensure_loaded_img(name, allow_missing=True)
         textures.append(img)
 
     return textures

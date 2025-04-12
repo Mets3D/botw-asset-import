@@ -154,7 +154,13 @@ def import_and_process_dae(
     set_active_collection(context, collection)
 
     with Timer("Import .dae + .fbx", asset_name):
-        objs = import_dae(context, full_path, discard_types=('EMPTY'), apply_transforms=apply_transforms)
+        try:
+            objs = import_dae(context, full_path, discard_types=('EMPTY'), apply_transforms=apply_transforms)
+        except RuntimeError:
+            # No idea why but on at least 1 asset, the .dae importer claims "parsing errors".
+            # We can fall back on the .fbx file. The only downside of this is that if the .dae 
+            # would've had a 2nd UVMap, the .fbx will not have that.
+            objs = import_fbx(context, full_path.replace(".dae", ".fbx"), discard_types=('EMPTY'), apply_transforms=apply_transforms)
         rig_name = "RIG-"+asset_name if rename_objects else ""
         objs = import_and_merge_fbx_armature(
             context,

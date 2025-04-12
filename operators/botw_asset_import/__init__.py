@@ -111,6 +111,8 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
                         remove_redundant_armatures=self.remove_redundant_armatures,
                         remove_redundant_UVs=self.remove_redundant_UVs,
                     )
+                    if not imported_coll:
+                        continue
                     imported_objects += imported_coll.all_objects
                     if self.rename_collections:
                         imported_coll.name = imported_coll['asset_name']
@@ -135,7 +137,7 @@ def import_and_process_dae(
         apply_transforms=True,
         remove_redundant_armatures=True,
         remove_redundant_UVs=True,
-    ) -> bpy.types.Collection:
+    ) -> bpy.types.Collection or None:
     dae_filename = os.path.basename(full_path)
     dirname = os.path.basename(os.path.dirname(full_path))
 
@@ -170,7 +172,7 @@ def import_and_process_dae(
             apply_transforms=apply_transforms
         )
     if not objs:
-        return []
+        return
 
     prefs = get_addon_prefs(context)
     # Try to load an in-game icon for this asset, 
@@ -282,7 +284,7 @@ def import_whatever(context, *, import_func, filepath: str, discard_types=('EMPT
                     orig_name = mat.name
                     if len(orig_name) > 4 and orig_name[-4] == ".":
                         orig_name = orig_name[:-4]
-                    mat['import_name'] = mat.name[:-4] if mat.name[-4]=="." and mat.name[-3:].isdigit() else mat.name
+                    mat['import_name'] = mat.name[:-4] if len(mat.name)>3 and mat.name[-4]=="." and mat.name[-3:].isdigit() else mat.name
     return context.selected_objects[:]
 
 def cleanup_fbx_armature(context, fbx_arm):

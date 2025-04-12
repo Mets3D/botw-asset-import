@@ -942,7 +942,7 @@ def ensure_loaded_img(img_name, allow_missing=False) -> bpy.types.Image or None:
     real_img_path = get_image_path(img_name)
     if not real_img_path:
         if not allow_missing:
-            raise FileNotFoundError(f"Can't find image in the image path cache: {img_name}")
+            raise FileNotFoundError(f"Can't find image in the image path cache (it probably doesn't exist): {img_name}")
         else:
             return
 
@@ -1020,7 +1020,8 @@ def load_assigned_json_textures(material) -> list[bpy.types.Image]:
         # NOTE: allow_missing=True because there is actually a very small number of textures referenced by materials that just... don't exist.
         # Eg. Armor_181_Head references an Emm_Nrm texture.
         img = ensure_loaded_img(name, allow_missing=True)
-        textures.append(img)
+        if img:
+            textures.append(img)
 
     return textures
 

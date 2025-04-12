@@ -1,8 +1,3 @@
-- Separate Skin shader: 'shaderassign>options>uking_material_behave'==101
-    This would break the existing Link/Armor/NPCs if we overwrite the resources.blend (which we would like to do)...
-    We can prevent that by not removing the sockets from the old Cel Shader yet, until going into those files and replacing the shaders while preserving any socket connections (print on fail)
-- Separate Hair shader
-    Same exact situation as above.
 - Investigate if non-cel-shaded metals have any special shading in-game ('shaderassign>options>uking_material_behave'==1)
 - 'shaderassign>options>uking_material_behave' : 103 seems to be water, should check if our current function gives the same result or not.
 - 'shaderassign>options>uking_material_behave' : 105 might be things affected by wind, it's mostly leaves and plants, but maybe also includes the clothes!? that would be great!!

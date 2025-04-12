@@ -12,6 +12,7 @@ module_names = (
     "resources",
     "mesh",
     "string",
+    "customprop",
 )
 
 

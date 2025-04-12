@@ -2,10 +2,13 @@ import bpy, os
 from bpy.props import StringProperty, EnumProperty, BoolProperty
 from mathutils import Matrix, Euler
 from math import radians
+from collections import defaultdict
+
+from .build_asset_library import ALL_MAP_SECTIONS, BLEND_DIR, load_instance_database
+from ..operators.botw_asset_import.prepare_scene import ensure_botw_scene_settings
+from ..utils.customprop import copy_property
 from ..utils.collections import ensure_collection
 from ..utils.resources import ensure_lib_datablock
-from .build_asset_library import ALL_MAP_SECTIONS, BLEND_DIR, load_instance_database
-from collections import defaultdict
 
 class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
     """Import one chunk of the overworld"""
@@ -44,6 +47,7 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
     def execute(self, context):
         map_data = load_instance_database()[self.map_section+"_instance_cache.json"]
 
+        ensure_botw_scene_settings(context)
         dynamic_assets = map_data[self.map_section+"_Dynamic"]["models"]
         static_assets = map_data[self.map_section+"_Static"]["models"]
 
@@ -84,6 +88,13 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
                     empty.empty_display_size = 0.01
                     empty.instance_type = 'COLLECTION'
                     empty.instance_collection = coll_linked_asset
+                    if empty.instance_collection:
+                        # We can copy the material control properties to the instancer and it will still work. Neat!
+                        # (In the material, the Attribute nodes have to be set to "Instancer" for this.)
+                        for obj in empty.instance_collection.all_objects:
+                            for prop_name in ('flow_speed', 'flow_axis'):
+                                if prop_name in obj:
+                                    copy_property(obj, empty, prop_name)
                     coll_asset.objects.link(empty)
 
         # Sort the asset collections alphabetically.

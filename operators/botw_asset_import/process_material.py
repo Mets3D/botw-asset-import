@@ -9,6 +9,7 @@ from ...utils.material import hash_material
 from ...utils.timer import Timer
 from ...utils.pixel_image import PixelImage
 from ...utils.string import increment_name
+from ...utils.customprop import make_property
 
 from .constants import (
     METAL_ROUGHNESS, DYES, OBJ_PREFIXES, GARBAGE_MATS, TEXTURE_EXTENSION, 
@@ -40,21 +41,24 @@ def process_mat(collection, obj, material):
     ### IN SOME CASES, SIMPLY REPLACE THIS MATERIAL. ###
 
     if is_waterfall(material):
-        # TODO: Wait, this is wrong, these properties have to be per-object, not per-material, unless we duplicate the material for every piece of water.
         water = ensure_lib_datablock('materials', "BotW Water")
         material.user_remap(water)
-        set_socket_value(water.node_tree.nodes['Main Shader'], "Speed", -5)
-        set_socket_value(water.node_tree.nodes['Main Shader'], "Axis Y/X", 1.0)
+        # I hooked up these material settings to object properties so they can be controlled per-object.
+        # This way we don't need to duplicate the water material, but instead all water can share just the one.
+        make_property(obj, 'flow_speed', -5.0, min=-1000, max=1000, soft_min=-10, soft_max=10)
+        make_property(obj, 'flow_axis', 1.0)
         return
     elif is_water(material):
         water = ensure_lib_datablock('materials', "BotW Water")
         material.user_remap(ensure_lib_datablock('materials', "BotW Water"))
-        set_socket_value(water.node_tree.nodes['Main Shader'], "Speed", 0.75)
-        set_socket_value(water.node_tree.nodes['Main Shader'], "Axis Y/X", 0.0)
+        make_property(obj, 'flow_speed', 0.75, min=-1000, max=1000, soft_min=-10, soft_max=10)
+        make_property(obj, 'flow_axis', 0.0)
         return
     elif is_lava(material):
         lava = ensure_lib_datablock('materials', "BotW Lava")
         material.user_remap(lava)
+        make_property(obj, 'flow_speed', 0.2, min=-1000, max=1000, soft_min=-10, soft_max=10)
+        make_property(obj, 'flow_axis', 1.0)
 
     ### IN SOME CASES, SIMPLY HIDE THIS OBJECT. ###
 

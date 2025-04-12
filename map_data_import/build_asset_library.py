@@ -4,6 +4,7 @@ import pickle
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import shared_memory
+from tqdm import tqdm
 
 from ..operators.botw_asset_import.constants import ensure_caches
 from ..prefs import get_addon_prefs
@@ -268,38 +269,43 @@ def build_asset_library(dae_to_blend_map: dict[str, str], quiet=True, workers=8,
 
     executor = ThreadPoolExecutor(max_workers=workers)
     file_pairs = list(dae_to_blend_map.items())
-    start_times = {}
     futures = []
 
+    dae_of_future = {}
+    blend_of_future = {}
+
     for dae_file, blend_file in file_pairs:
-        start_time = time.time()  # Record start time
         future = executor.submit(subprocess_import_asset, dae_file, blend_file, quiet, True, timeout)
-        start_times[future] = start_time  # Track when each future started
+        blend_of_future[future] = blend_file
+        dae_of_future[future] = dae_file
         futures.append(future)
 
     num_completed = 0
     timedout_assets = []
+    failed_assets = []
 
     total = len(list(dae_to_blend_map.keys()))
+    bar_format = "Completed: {n_fmt}/{total_fmt} ({elapsed_s:.2f}s){bar}"
 
-    for i, future in enumerate(as_completed(futures)):
-        dae_file = file_pairs[i][1]
+    for i, future in tqdm(enumerate(as_completed(futures)), total=total, bar_format=bar_format):
+        dae_file = dae_of_future[future]
+        blend_file = blend_of_future[future]
 
         res = future.result()
 
-        if res == 'complete':
-            start_time = start_times[future]
-            end_time = time.time()
-            duration = end_time - start_time
-            print(f"File ({i}/{total}) {dae_file} completed in {duration:.2f} seconds", flush=True)
+        if not os.path.exists(blend_file):
+            tqdm.write(f"FAILED: ({i}/{total}) {dae_file}\n     Try importing this file manually to see what goes wrong.")
+            failed_assets.append(dae_file)
+        elif res == 'complete':
+            tqdm.write(f"Created: ({i}/{total}) {blend_file}")
             num_completed += 1
         else:
             timedout_assets.append(dae_file)
 
-    print(f'\nAssets completed: {num_completed}')
-    print(f'Assets timed out: {len(timedout_assets)}')
-    for timedout_asset in timedout_assets:
-        print(timedout_asset)
+    if timedout_assets:
+        print(f"Assets timed out: {len(timedout_assets)}\n" + "\n".join(timedout_assets))
+    if failed_assets:
+        print(f"Assets failed: {len(failed_assets)}\n" + "\n".join(failed_assets))
     print(f'\nCompleted in {time.time() - start_time:.2f} seconds.\n')
 
     # free up memory
@@ -338,6 +344,7 @@ def subprocess_import_asset(dae_path, blend_path, quiet=True, background=True, t
         if not quiet:
             for line in sprocess.stdout:
                 print(line.strip())
+
         sprocess.wait(timeout=timeout_s)
     except subprocess.TimeoutExpired:
         print(f'Timeout for {args} ({timeout_s}s) expired', file=sys.stderr)

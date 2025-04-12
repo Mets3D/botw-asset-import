@@ -29,6 +29,10 @@ Map Importer TODOs:
             - Hook up to some linked nodegroup so that if multiple chunks are present, their shading can be edited together.
             - Check if normal map Z channel is working as intended, it's yellow to start, sus.
 
+Extraction tutorial:
+    - Add images or videos of the resulting imported shaders and animations
+    - Same for the ReadMe of the Git repo.
+
 Asset pack release:
     - Need to re-do Obj_Objects because a bunch of objects have no textures assigned for some reason.
     - Need to re-do Obj_Fauna to fix transparency and add wind.

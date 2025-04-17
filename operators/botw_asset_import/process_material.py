@@ -415,7 +415,7 @@ def get_tex_data(material, img) -> dict:
 def get_shader_prop_of_mat(material, prop_path, index=None):
     shader_data = get_shader_data(material)
     if not shader_data:
-        return None
+        return "N/A"
     return get_shader_prop(shader_data, prop_path, index)
 
 def get_shader_prop(shader_data, prop_path, index=None):
@@ -513,6 +513,24 @@ def get_alpha_mode(material) -> str:
     # shaderassign.options.gsys_force_zprepass
 
     return 'BLENDED' if blend_mode == 'Translucent' else 'DITHERED'
+
+def is_transparent(material):
+    # Switch Toolbox is definitely not always correct about its isTransparent flag, 
+    # eg. Mt_Builparts_HyruleCastleInside_SpiderWeb_A has it on False.
+    texture_maps = get_shader_prop_of_mat(material, 'TextureMaps')
+    if not texture_maps:
+        return False
+    if any(("Him" in name for name, data in texture_maps.items())):
+        return False
+
+    switch_toolbox_thinks = get_shader_prop_of_mat(material, 'isTransparent') != 1
+    alb_node = get_albedo_img_node(material)
+    albedo_has_alpha = None
+    if alb_node:
+        albedo_has_alpha = PixelImage.from_blender_image(alb_node.image).has_alpha
+    # i_think = get_shader_prop_of_mat(material, 'shaderassign>options>gsys_gbuffer_xlu') == 1
+    return switch_toolbox_thinks or albedo_has_alpha
+
 
 def get_color_values(material) -> list[Vector]:
     colors = []
@@ -681,28 +699,21 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
     lc_assetname = (collection.get('asset_name') or "").lower()
 
     links = material.node_tree.links
-
-    metal, rubber = False, False
-    rubbery_words = ['rubber']
-    if spm_has_green:
-        if any([word in lc_obname for word in rubbery_words]):
-            rubber = True
-        else:
-            # If there's an SPM green channel and it's not for rubber, then it's for metal.
-            metal = True
-    if "arrow" in lc_dirname:
-        metal = True
+    behave = get_shader_prop_of_mat(material, 'shaderassign>options>uking_material_behave')
+    metal_color = get_shader_prop_of_mat(material, 'shaderassign>options>uking_metal_color')
 
     # Hardcode some other values.
     if collection['asset_name'] == "Majora's Mask":
-        rubber, metal = False, False
         set_socket_value(shader_node, 'Emission Strength', 1.0)
         set_socket_value(shader_node, 'Fake Rimlights', 0.0)
         set_socket_value(shader_node, 'Sketch Highlight Spread', 0.0)
+        return False
     if 'ancient' in lc_assetname:
+        # TODO: Is this still necessary?
         set_socket_value(shader_node, 'Emission Color', [1.000000, 0.245151, 0.025910, 1.000000])
     if material['import_name'] in ('Mt_Lens', 'Mt_Glass'):
         # TODO: Could probably hunt down a more reliable way to catch glass.
+        # ('shaderassign>options>uking_material_behave' : 102)
         # This catches Tingle's clockface and Hylian glasses. I know there's also some glass outside of one of the tech labs.
         set_socket_value(shader_node, 'Alpha', 0.05)
     if collection['asset_name'] == 'Fierce Deity Mask' and material['import_name'] == 'Mt_Eyeemm':
@@ -723,7 +734,7 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
     if shader_node.node_tree.name == 'BotW: Material Blend':
         # Transparent edges are used by meshes that sometimes help blend between different terrain objects.
         # (But idk yet how to detect them. The commented line below had way too many false positives.)
-        # set_socket_value(shader_node, "Transparent Edges", get_shader_prop_of_mat(material, 'isTransparent') or False)
+        # set_socket_value(shader_node, "Transparent Edges", is_transparent(material))
         ensure_edge_attribute(bpy.context, obj)
         # Whenever the moss is used it just looks way too much/bad and idk how to fix it, let's just turn it down.
         albedo = get_albedo_img_node(material)
@@ -752,10 +763,27 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
             if img_name in LEAF_WIND_UV_ROTATIONS:
                 set_socket_value(shader_node, 'Wind UV Rotation', radians(LEAF_WIND_UV_ROTATIONS[img_name]))
 
-    if get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair')==402:
+    metal = spm_has_green
+    if "arrow" in lc_dirname:
+        metal = True
+    if (
+        (behave == 1) or 
+        (behave == 2 and metal_color == 2)
+    ):
+        # TODO: Check if other behave/metal_color value combos should also be metal.
+        metal = True
+
+    if get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair') == 402:
         set_socket_value(shader_node, "Hair", True)
-    for socket_name, value in (('Rubber', rubber), ('Metal', metal)):
-        set_socket_value(shader_node, socket_name, value)
+    elif metal:
+        set_socket_value(shader_node, "Metal", True)
+        set_socket_value(shader_node, "Metallic", 1.0)
+        set_socket_value(shader_node, "Roughness", METAL_ROUGHNESS)
+    elif spm_has_green and "rubber" in lc_obname:
+        set_socket_value(shader_node, "Rubber", True)
+    if 'Metallic' in shader_node.inputs and len(shader_node.inputs['Metallic'].links) > 0:
+        set_socket_value(shader_node, "Roughness", METAL_ROUGHNESS)
+
 
 def ensure_edge_attribute(context, object):
     if 'edge' in object.data.attributes:
@@ -831,7 +859,7 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
             set_socket_value(shader_node, f"Blend 1 Factor", 1)
 
         if len(shader_socket.links) == 0:
-            if shader_socket.name == 'Alpha' and get_shader_prop_of_mat(material, 'isTransparent') != 1:
+            if shader_socket.name == 'Alpha' and is_transparent(material):
                 pass
             else:
                 links.new(img_node.outputs['Color'], shader_socket)
@@ -840,11 +868,11 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
             # This can happen with dye textures, reskins, etc.
             pass
 
-        if bool(get_shader_prop_of_mat(material, 'isTransparent')) != False:
+        if is_transparent(material):
             material.surface_render_method = get_alpha_mode(material)
         # Since transparency doesn't (always) get its own texture node, hook up the Alpha of the Albedo.
         alpha_socket = shader_node.inputs.get('Alpha')
-        if socket_name in ('Albedo', 'Fx Texture Distorted') and get_shader_prop_of_mat(material, 'isTransparent')==1 and pixel_image.has_alpha:
+        if socket_name in ('Albedo', 'Fx Texture Distorted') and is_transparent(material) and pixel_image.has_alpha:
             if alpha_socket and len(alpha_socket.links) == 0 and 'Alpha' in img_node.outputs:
                 links.new(img_node.outputs['Alpha'], alpha_socket)
         # But if after those steps we didn't hook up any alpha, don't set it to Blended, since that will cause sorting issues.

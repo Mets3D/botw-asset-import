@@ -74,7 +74,7 @@ LEAF_ZFIGHT_HACK = [
     ('Obj_TreeConiferous_A_Snow_03', 'A10__Mt_Treeleaf_01'),
 ]
 
-METAL_ROUGHNESS = 0.6
+METAL_ROUGHNESS = 0.5
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 ADDON_DIR = os.sep.join(THIS_FOLDER.split(os.sep)[:-2])

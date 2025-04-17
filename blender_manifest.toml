@@ -14,5 +14,8 @@ blender_version_min = "4.4.0"
 license = [
   "SPDX:GPL-3.0-or-later",
 ]
+wheels = [
+   "./wheels/tqdm-4.67.1-py3-none-any.whl",
+]
 [permissions]
 files = "Load .dae/.fbx/.png/.jpg/.blend files from disk"

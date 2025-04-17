@@ -104,14 +104,43 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
                         coll_asset.objects.link(empty)
                     pbar.update(1)
 
-        # Sort the asset collections alphabetically.
+        # Sort the asset collections alphabetically and organize by type.
         for coll in sorted(coll_root_temp.children, key=lambda c: c.name):
-            coll_root.children.link(coll)
+            parent = coll_root
+            asset_type = get_asset_type(coll)
+            if asset_type in ("Npc", "Animal", "Enemy"):
+                parent = ensure_collection(context, self.map_section + " NPCs", coll_root)
+            elif asset_type == "Far":
+                parent = ensure_collection(context, self.map_section + " Far", coll_root)
+            else:
+                parent = ensure_collection(context, self.map_section + " Assets", coll_root)
+            parent.children.link(coll)
             coll_root_temp.children.unlink(coll)
         bpy.data.collections.remove(coll_root_temp)
 
         return {'FINISHED'}
 
+
+def get_asset_type(coll):
+    first_obj = coll.objects[0]
+    linked_coll = first_obj.instance_collection
+    if not linked_coll:
+        return "Missing"
+    dirname = linked_coll['dirname']
+    if "Far" in dirname:
+        return "Far"
+    elif "Npc" in dirname:
+        return 'Npc'
+    elif "Animal_" in dirname:
+        return 'Animal'
+    elif "Enemy_" in dirname:
+        return 'Enemy'
+    elif dirname in ("Link", "WLlink"):
+        return 'Link'
+    elif "Armor_" in dirname:
+        return 'Armor'
+    
+    return 'Env'
 
 registry = [
     OBJECT_OT_botw_import_map_section,

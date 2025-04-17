@@ -10,7 +10,7 @@ class PixelImage:
     cache = {}
 
     @classmethod
-    def from_blender_image(cls, bpy_img: bpy.types.Image, ignore_cache=False, cached_data={}):
+    def from_blender_image(cls, bpy_img: bpy.types.Image, ignore_cache=False):
         if bpy_img.name in cls.cache and not ignore_cache:
             return cls.cache[bpy_img.name]
 

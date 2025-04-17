@@ -1,4 +1,8 @@
-- Investigate if non-cel-shaded metals have any special shading in-game ('shaderassign>options>uking_material_behave'==1)
+- Implement replacing the malice materials, I guess. We made it look kinda cool. Although idk if it should be only for Ganon or all malice in the game... sigh... more scope.
+
+- I tweaked Switch Toolbox to use a . for separator between object and material name, but now need to pack it up as a release build again if I want it to be available for others... sigh.
+
+- Expose skin settings to be per-object (or instance). (damage and cold)
 - 'shaderassign>options>uking_material_behave' : 103 seems to be water, should check if our current function gives the same result or not.
 - 'shaderassign>options>uking_material_behave' : 105 might be things affected by wind, it's mostly leaves and plants, but maybe also includes the clothes!? that would be great!!
 - 'shaderassign>options>uking_material_behave' : 102 is always glass but I'm not sure if it is all glass. Either way, we could add some treatment for it.

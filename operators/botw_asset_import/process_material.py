@@ -19,7 +19,7 @@ from .constants import (
 
 ### MAIN MATERIAL PROCESSING FUNCTION ###
 
-def process_mat(collection, obj, material):
+def process_mat(collection, obj, material) -> bpy.types.Material or None:
     """My best effort at setting up materials based on data exported from my custom 
     Switch Toolbox, and included in this add-on inside materials.zip.
     """
@@ -41,24 +41,23 @@ def process_mat(collection, obj, material):
     ### IN SOME CASES, SIMPLY REPLACE THIS MATERIAL. ###
 
     if is_waterfall(material):
-        water = ensure_lib_datablock('materials', "BotW Water")
-        material.user_remap(water)
         # I hooked up these material settings to object properties so they can be controlled per-object.
         # This way we don't need to duplicate the water material, but instead all water can share just the one.
         make_property(obj, 'flow_speed', -5.0, min=-1000, max=1000, soft_min=-10, soft_max=10)
         make_property(obj, 'flow_axis', 1.0)
-        return
+        return ensure_lib_datablock('materials', "BotW Water")
     elif is_water(material):
-        water = ensure_lib_datablock('materials', "BotW Water")
-        material.user_remap(ensure_lib_datablock('materials', "BotW Water"))
         make_property(obj, 'flow_speed', 0.75, min=-1000, max=1000, soft_min=-10, soft_max=10)
         make_property(obj, 'flow_axis', 0.0)
-        return
+        return ensure_lib_datablock('materials', "BotW Water")
     elif is_lava(material):
-        lava = ensure_lib_datablock('materials', "BotW Lava")
-        material.user_remap(lava)
         make_property(obj, 'flow_speed', 0.2, min=-1000, max=1000, soft_min=-10, soft_max=10)
         make_property(obj, 'flow_axis', 1.0)
+        return ensure_lib_datablock('materials', "BotW Lava")
+    elif is_malice(material):
+        make_property(obj, 'malice_speed', 1.0, min=-10, max=10)
+        make_property(obj, 'malice_glow', 1.0, min=0, max=10)
+        return ensure_lib_datablock('materials', "BotW Malice")
 
     ### IN SOME CASES, SIMPLY HIDE THIS OBJECT. ###
 
@@ -209,6 +208,8 @@ def guess_sockets_for_textures(material, textures, shader_name) -> OrderedDict[b
         if type == 'Diffuse':
             if "_Red_Alb" in img.name and shader_name=='BotW: Cel Shade':
                 socket_map[img] = "Skin Red Albedo"
+            elif "_Damage_Alb" in img.name and shader_name=='BotW: Cel Shade':
+                socket_map[img] = "Skin Damage Albedo"
             else:
                 socket_map[img] = "Albedo"
         elif type == 'Alpha':
@@ -242,6 +243,8 @@ def guess_colorspace(material, img):
             return 'sRGB'
 
     if "_Alb" in img.name or "MaterialAlb" in img.name:
+        if "_Red_Alb" in img.name or "Damage_Alb" in img.name:
+            return 'Non-Color'
         return 'sRGB'
 
     return 'Non-Color'
@@ -254,7 +257,7 @@ def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
     elif type(img) == str:
         lc_img_name = img.lower()
     else:
-        return ""
+        assert False, 'img must be an Image or str'
 
     if shader_name == 'BotW: Eye' and 'shadow' in lc_img_name:
         return "Eye Shadow"
@@ -265,7 +268,6 @@ def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
         elif "_damage_alb" in lc_img_name and shader_name=='BotW: Cel Shade':
             return "Skin Damage Albedo"
         return "Albedo"
-        
     elif "clrmak_00" in lc_img_name or "clrmsk_00" in lc_img_name:
         return "Tint Mask 0"
     elif "clrmak_01" in lc_img_name or "clrmsk_01" in lc_img_name:
@@ -306,8 +308,10 @@ def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
 
     return ""
 
-def guess_tex_uses_first_uv(material, img) -> bool or None:
+def guess_tex_uses_first_uv(material, img, socket_name) -> bool or None:
     """Trying to make an educated guess but I really wish I could find a sure way to tell what texture uses what UVMap."""
+    if socket_name in ('Skin Red Albedo', 'Skin Damage Albedo'):
+        return True
     tex_data = get_tex_data(material, img)
     if not tex_data:
         return True
@@ -386,6 +390,17 @@ def is_water(material) -> bool:
     if any_in_any(['Water'], textures):
         return True
     
+    return False
+
+def is_malice(material) -> bool:
+    textures = get_shader_prop_of_mat(material, 'TextureMaps')
+    if not textures:
+        return False
+
+    malice_names = ['CmnTex_Grudge']
+    if any_in_any(malice_names, textures):
+        return True
+
     return False
 
 def is_waterfall(material) -> bool:
@@ -531,7 +546,6 @@ def is_transparent(material):
     # i_think = get_shader_prop_of_mat(material, 'shaderassign>options>gsys_gbuffer_xlu') == 1
     return switch_toolbox_thinks or albedo_has_alpha
 
-
 def get_color_values(material) -> list[Vector]:
     colors = []
     matparam = get_shader_prop_of_mat(material, 'matparam')
@@ -581,7 +595,7 @@ def create_helper_nodes(collection, object, material, img_node, pixel_image, soc
 
     lc_assetname = (collection.get('asset_name') or "").lower()
 
-    ensure_UV_node(object, material, img_node, shader_name)
+    ensure_UV_node(object, material, img_node, socket_name, shader_name)
 
     if shader_name == 'BotW: Eye' and socket_name in ('Albedo', 'Emission Color', 'Emission Mask', 'Normal Map') and len(img_node.inputs) > 0:
         eye_rig_node = nodes.get("Eye Rig")
@@ -640,7 +654,7 @@ def create_helper_nodes(collection, object, material, img_node, pixel_image, soc
     elif socket_name == 'Metallic':
         set_socket_value(shader_node, 'Roughness', METAL_ROUGHNESS)
 
-def ensure_UV_node(object, material, img_node, shader_name):
+def ensure_UV_node(object, material, img_node, socket_name, shader_name):
     if img_node.type != 'TEX_IMAGE':
         return
 
@@ -671,7 +685,7 @@ def ensure_UV_node(object, material, img_node, shader_name):
 
     lc_img_name = img_node.image.name.lower()
     if len(object.data.uv_layers) > 1:
-        uses_first_uvmap = guess_tex_uses_first_uv(material, img_node.image)
+        uses_first_uvmap = guess_tex_uses_first_uv(material, img_node.image, socket_name)
         if "_alb" in lc_img_name and "damage" in lc_img_name:
             uses_first_uvmap = False
         if shader_name == 'BotW: Generic NPC' and "_ao" in lc_img_name:
@@ -784,7 +798,6 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
     if 'Metallic' in shader_node.inputs and len(shader_node.inputs['Metallic'].links) > 0:
         set_socket_value(shader_node, "Roughness", METAL_ROUGHNESS)
 
-
 def ensure_edge_attribute(context, object):
     if 'edge' in object.data.attributes:
         return
@@ -830,6 +843,11 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
             socket_name = guess_socket_name(img, shader_name)
 
         img_node.location = (-300, (i-dye_count)* -300)
+
+        if socket_name == 'Skin Red Albedo':
+            make_property(object, 'skin_cold', default=0.0, min=0, max=1)
+        if socket_name == 'Skin Damage Albedo':
+            make_property(object, 'skin_damaged', default=0.0, min=0, max=1)
 
         if socket_name == 'Albedo' and shader_name == 'BotW: Cel Shade':
             existing_albedo = get_albedo_img_node(material)

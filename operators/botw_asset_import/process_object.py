@@ -51,7 +51,7 @@ def process_obj(
             # Sometimes there's also a 3rd UV layer.
             uv_layer.name = name
 
-        for mat in obj.data.materials:
+        for i, mat in enumerate(obj.data.materials):
             if rename_ob_mat:
                 new_name = mat.name
                 if "Mt_" in mat.name:
@@ -68,7 +68,9 @@ def process_obj(
                 mat.name = new_name
 
             with Timer("Setup material", mat.name):
-                process_mat(collection, obj, mat)
+                mat = process_mat(collection, obj, mat)
+                if mat:
+                    obj.data.materials[i] = mat
                 set_object_color(obj)
 
     if obj:

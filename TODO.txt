@@ -8,11 +8,9 @@ Importer feature ideas:
     - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece. Could be fun to store and add related functionality to the BlankFile.blend scripts.
 
 Map Importer TODOs:
-    - Organize Far objects, Enemies, NPCs, Animals into separate collections so they can be disabled easily.
-
     Terrain
         - I started trying to refactor bmubin
-            - We always loop over the whole grid, but skip certain blocks depending on what's returned by lod_ignore(), and I'd like to change that function to allow us to define a starting point and a size, rather than a point and a radius.
+            - We always loop over the whole grid, but skip certain blocks depending on what's returned by lod_ignore(), which is dumb.
         - I made a very quick and dirty test of the material, but it will have to be generated procedurally in order to keep memory usage to a minimum (only load necessary textures for a given chunk)
             - Mix together all used material0 albedos (with most common to least common, generate nodes top to bottom, left to right.)
             - Repeat for material0 normals

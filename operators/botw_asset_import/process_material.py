@@ -40,24 +40,24 @@ def process_mat(collection, obj, material) -> bpy.types.Material or None:
 
     ### IN SOME CASES, SIMPLY REPLACE THIS MATERIAL. ###
 
-    if is_waterfall(material):
-        # I hooked up these material settings to object properties so they can be controlled per-object.
-        # This way we don't need to duplicate the water material, but instead all water can share just the one.
-        make_property(obj, 'flow_speed', -5.0, min=-1000, max=1000, soft_min=-10, soft_max=10)
-        make_property(obj, 'flow_axis', 1.0)
-        return ensure_lib_datablock('materials', "BotW Water")
-    elif is_water(material):
-        make_property(obj, 'flow_speed', 0.75, min=-1000, max=1000, soft_min=-10, soft_max=10)
-        make_property(obj, 'flow_axis', 0.0)
-        return ensure_lib_datablock('materials', "BotW Water")
-    elif is_lava(material):
-        make_property(obj, 'flow_speed', 0.2, min=-1000, max=1000, soft_min=-10, soft_max=10)
-        make_property(obj, 'flow_axis', 1.0)
-        return ensure_lib_datablock('materials', "BotW Lava")
-    elif is_malice(material):
-        make_property(obj, 'malice_speed', 1.0, min=-10, max=10)
-        make_property(obj, 'malice_glow', 1.0, min=0, max=10)
-        return ensure_lib_datablock('materials', "BotW Malice")
+    # if is_waterfall(material):
+    #     # I hooked up these material settings to object properties so they can be controlled per-object.
+    #     # This way we don't need to duplicate the water material, but instead all water can share just the one.
+    #     make_property(obj, 'flow_speed', -5.0, min=-1000, max=1000, soft_min=-10, soft_max=10)
+    #     make_property(obj, 'flow_axis', 1.0)
+    #     return ensure_lib_datablock('materials', "BotW Water")
+    # elif is_water(material):
+    #     make_property(obj, 'flow_speed', 0.75, min=-1000, max=1000, soft_min=-10, soft_max=10)
+    #     make_property(obj, 'flow_axis', 0.0)
+    #     return ensure_lib_datablock('materials', "BotW Water")
+    # elif is_lava(material):
+    #     make_property(obj, 'flow_speed', 0.2, min=-1000, max=1000, soft_min=-10, soft_max=10)
+    #     make_property(obj, 'flow_axis', 1.0)
+    #     return ensure_lib_datablock('materials', "BotW Lava")
+    # elif is_malice(material):
+    #     make_property(obj, 'malice_speed', 1.0, min=-10, max=10)
+    #     make_property(obj, 'malice_glow', 1.0, min=0, max=10)
+    #     return ensure_lib_datablock('materials', "BotW Malice")
 
     ### IN SOME CASES, SIMPLY HIDE THIS OBJECT. ###
 
@@ -168,6 +168,7 @@ def guess_sockets_for_textures(material, textures, shader_name) -> OrderedDict[b
     tex_types = []
     for img in textures:
         tex_data = get_tex_data(material, img)
+        print(material.name, img.name)
         assert tex_data != {}
         type = tex_data['Type'].strip()
         if type == 'Unknown':
@@ -383,7 +384,7 @@ def is_water(material) -> bool:
     if any_in_any(water_names, textures):
         return True
 
-    not_water = ['Grass', 'Ibt', 'FairySpringWater', 'Grudge']
+    not_water = ['Grass', 'Ibt', 'FairySpringWater', 'Grudge', 'Seaweed', 'Lily', 'Frogbit', 'ChaseBullet']
     if any_in_any(not_water, textures):
         return False
 
@@ -391,6 +392,13 @@ def is_water(material) -> bool:
         return True
     
     return False
+
+def is_waterfall(material) -> bool:
+    textures = get_shader_prop_of_mat(material, 'TextureMaps')
+    if not textures:
+        return False
+
+    return any_in_any(['CmnWaterFall'], textures)
 
 def is_malice(material) -> bool:
     textures = get_shader_prop_of_mat(material, 'TextureMaps')
@@ -402,13 +410,6 @@ def is_malice(material) -> bool:
         return True
 
     return False
-
-def is_waterfall(material) -> bool:
-    textures = get_shader_prop_of_mat(material, 'TextureMaps')
-    if not textures:
-        return False
-
-    return any_in_any(['CmnWaterFall'], textures)
 
 def is_lava(material) -> bool:
     textures = get_shader_prop_of_mat(material, 'TextureMaps')
@@ -425,7 +426,11 @@ def get_tex_data(material, img) -> dict:
     tex_maps = get_shader_prop_of_mat(material, 'TextureMaps')
     if not tex_maps:
         return {}
-    return next((data for name, data in tex_maps.items() if name == Path(img.filepath).stem), {})
+    img_name = Path(img.filepath).stem
+    tex_data = next((data for name, data in tex_maps.items() if name == img_name), {})
+    if not tex_data and not img.name.startswith("Far_"):
+        tex_data = next((data for name, data in tex_maps.items() if name == "Far_"+img_name), {})
+    return tex_data
 
 def get_shader_prop_of_mat(material, prop_path, index=None):
     shader_data = get_shader_data(material)
@@ -987,7 +992,9 @@ def ensure_loaded_img(img_name, allow_missing=False) -> bpy.types.Image or None:
 
     real_img_path = get_image_path(img_name)
     if not real_img_path:
-        if not allow_missing:
+        if not img_name.startswith("Far_"):
+            return ensure_loaded_img("Far_"+img_name, allow_missing=allow_missing)
+        elif not allow_missing:
             raise FileNotFoundError(f"Can't find image in the image path cache (it probably doesn't exist): {img_name}")
         else:
             return
@@ -999,7 +1006,7 @@ def ensure_loaded_img(img_name, allow_missing=False) -> bpy.types.Image or None:
         img = bpy.data.images.load(real_img_path, check_existing=True)
 
     tex_info = cache_get_tex_info()
-    
+
     if img.name in tex_info:
         tex_info = tex_info[img.name]
         img['is_single_color'] = tex_info['is_single_color']

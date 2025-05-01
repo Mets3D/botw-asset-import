@@ -1,9 +1,9 @@
 ### What's this
 
-This is a Blender extension to import BotW assets in .dae & .fbx format into Blender with a lot of automated clean-up. It includes various shaders which will be assigned automatically. I made it to enable the creation of 3D fan-art, but it can be useful for previewing mod content as well.
+This is a Blender extension to import BotW assets in .dae & .fbx format (you kinda need both) into Blender with a lot of automated clean-up. It includes various shaders which will be assigned automatically. I made it to enable the creation of 3D fan-art, but it can be useful for previewing mod content as well.
 
 ### Preparing Game Files
-I wrote a detailed guide on how to prepare the game files for use with this add-on, which you can find [here](https://open3dlab.com/tutorials/view/241/). As you follow that write-up Step 6 will lead you back to here.
+I wrote a detailed guide on how to prepare the game files for use with this add-on, which you can find [here](https://open3dlab.com/tutorials/view/241/). As you follow that guide, Step 6 will lead you back to here. If you're already familiar with modding and Switch Toolbox, then you only need that guide if you want to import mod assets.
 
 ### Installation & file paths
 The add-on was written for Blender 4.4. Other versions may have issues. (ie. AttributeErrors)
@@ -27,13 +27,12 @@ Things to note:
 - I did my best to make materials look as close as possible to how they look in the game, but it can't be perfect.
 
 ### Asset Operators
-These may be split out into a separate add-on in the future, which I'll try to remember to mention here if it ever happens.
-These are:
-- Merge Actions (bpy.ops.asset.merge_actions): Merge any actions selected in the Asset Browser/Outliner. Useful Link's animations, where he sometimes has unique animations split up into separate head/body actions that belong together.
-- Merge Armatures (bpy.ops.object.botw_merge_armatures): Merge selected armatures by removing duplicate bones and preserving parenting/modifier relationships. Useful for merging clothes onto characters.
-- Focus Asset (bpy.ops.asset.focus_asset): Supports Collection and Action assets. When a Collection asset is selected, this will isolate that collection, and frame the viewport to its objects. With an Action, it will only work when there is an active armature object, and it will assign the action, set the scene's frame range, and focus the camera on the rig's visible child objects. Handy in combination with the next operator, especially if you use Blender's "Lock Camera to View" option.
-- Thumbnail From Viewport (bpy.ops.asset.thumbnail_from_viewport): Makes a viewport snapshot and assigns it as the thumbnail of the active asset. Overlays will be disabled, but it's up to you to enter rendered view if you want to. Transparent pixels will be cropped, and the resolution is capped at 256 (by scaling it down if needed) which is Blender's hard limit for asset thumbnails.
-- Crop Asset Thumbnails (bpy.ops.asset.crop_asset_thumbnails): Crops transparent pixels out of the selected assets' thumbnails.
+Some of these operators are not strictly related to BotW and may be split out into a separate add-on in the future. They are for helping to create an actually usable asset library:
+- Merge Actions: Merge any actions selected in the Asset Browser/Outliner. Useful for Link's animations, where he sometimes has unique animations split up into separate head/body actions that belong together.
+- Merge Armatures: Merge selected armatures by removing duplicate bones and preserving parenting/modifier relationships. Useful for merging clothes onto characters.
+- Focus Asset: Supports Collection and Action assets. When a Collection asset is selected, this will isolate that collection, and frame the viewport to its objects. With an Action, it will only work when there is an active armature object, and it will assign the action, set the scene's frame range, and focus the camera on the rig's visible child objects. Handy in combination with the next operator, especially if you use Blender's "Lock Camera to View" option.
+- Thumbnail From Viewport: Makes a viewport snapshot and assigns it as the thumbnail of the active asset. Overlays will be disabled, but it's up to you to enter rendered view if you want to. Transparent pixels will be cropped, and the resolution is capped at 256 (by scaling it down if needed) which is Blender's hard limit for asset thumbnails.
+- Crop Asset Thumbnails: Crops transparent pixels out of the selected assets' thumbnails.
 
 ### Animations
 The add-on also includes a modified version of the [.seanim importer](https://github.com/SE2Dev/io_anim_seanim) by [SE2DEV](https://github.com/SE2Dev). The following modifications were made:
@@ -63,4 +62,4 @@ This project wouldn't have been possible without at least the following open sou
 - [Noesis](https://richwhitehouse.com/index.php?content=inc_projects.php&showproject=91)
 Furthermore:
 - A big thank you to [thejudsub](https://www.youtube.com/watch?v=Sb3CRU2DufU) for his Blender shading tutorial series which inspired this whole project.
-- Thanks to [freestylized.com](https://freestylized.com/) for the sky texture I used (they have many more, really worth checking out!)
+- Thanks to [freestylized.com](https://freestylized.com/) for the sky texture I included.

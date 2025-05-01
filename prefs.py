@@ -21,6 +21,11 @@ class BotWImportPreferences(AddonPreferences):
         subtype='FILE_PATH',
         description="If the path to the Bear's Eat animation is this:\nD:\\BotW Extracted\\Animations\\Animal_Bear_Animation\\Eat.seanim\nThen in this box you should browse this:\nD:\\BotW Extracted\\Animations\\"
     )
+    assets_output_folder: StringProperty(
+        name="Assets Folder",
+        subtype='FILE_PATH',
+        description="Folder to place .blend files of individual imported assets."
+    )
 
     resource_append_mode: EnumProperty(
         name="Resource Load Mode",

@@ -39,7 +39,11 @@ def ensure_botw_scene_settings(context):
         if area.type == 'VIEW_3D':
             area.spaces.active.shading.type = 'SOLID'
             area.spaces.active.shading.light = 'MATCAP'
-            area.spaces.active.shading.studio_light = 'botw.exr'
+            try:
+                area.spaces.active.shading.studio_light = 'botw.exr'
+            except TypeError:
+                # Blender has to be restarted after enabling the add-on for this to work, sigh...
+                pass
             area.spaces.active.shading.color_type = 'TEXTURE'
             # Enable viewport compositing for bloom.
             area.spaces.active.shading.use_compositor = 'ALWAYS'

@@ -9,9 +9,6 @@ from tqdm import tqdm
 from ..operators.botw_asset_import.constants import ensure_caches
 from ..prefs import get_addon_prefs
 
-# TODO: Move this to the preferences or derive from existing preferences
-BLEND_DIR = "D:\\BotW Assets\\bmubin asset library\\assets"
-
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 ADDON_DIR = os.sep.join(THIS_FOLDER.split(os.sep)[:-1])
 RESOURCE_BLEND = os.path.join(ADDON_DIR, "resources.blend")
@@ -95,6 +92,8 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         dae_map = get_dae_files_to_process(model_dir, self.target_dir, self.overwrite, ignore_words, self.asset_group)
         self.dae_count = len(list(dae_map.values()))
         self.dae_map = json.dumps(dae_map)
+        prefs = get_addon_prefs()
+        prefs.assets_output_folder = self.target_dir
 
     quiet: BoolProperty(
         name="Quiet", 
@@ -125,7 +124,6 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         name="Output Folder", 
         subtype='DIR_PATH', 
         description="Folder where a .blend file will be created for each .dae file", 
-        default=BLEND_DIR, 
         update=count_dae
     )
     asset_group: EnumProperty(
@@ -145,6 +143,7 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
     dae_map: StringProperty()
 
     def invoke(self, context, _event):
+        self.target_dir = get_addon_prefs().assets_output_folder
         self.count_dae(context)
         return context.window_manager.invoke_props_dialog(self, width=400)
 
@@ -173,6 +172,7 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         layout.label(text=f"{self.dae_count} asset .blend files will be generated.")
 
     def execute(self, context):
+        assert os.path.exists(self.target_dir) and not os.path.isfile(self.target_dir), "Output folder not found: "+self.target_dir
         dae_to_blend_map = json.loads(self.dae_map)
         build_asset_library(dae_to_blend_map, self.quiet, self.blender_instances)
         return {'FINISHED'}

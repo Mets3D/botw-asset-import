@@ -5,11 +5,12 @@ from math import radians
 from collections import defaultdict
 from tqdm import tqdm
 
-from .build_asset_library import map_section_enum_items, BLEND_DIR, load_instance_database
+from .build_asset_library import map_section_enum_items, load_instance_database
 from ..operators.botw_asset_import.prepare_scene import ensure_botw_scene_settings
 from ..utils.customprop import copy_property
 from ..utils.collections import ensure_collection
 from ..utils.resources import ensure_lib_datablock
+from ..prefs import get_addon_prefs
 
 class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
     """Import one chunk of the overworld"""
@@ -21,7 +22,6 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
         name="Asset Folder", 
         subtype='DIR_PATH', 
         description="Folder where the .blend files containing the map's assets can be found. Missing assets will be printed to the system console.", 
-        default=BLEND_DIR, 
     )
     map_section: EnumProperty(
         name="Map Section", 
@@ -36,6 +36,7 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
     )
 
     def invoke(self, context, _event):
+        self.blend_dir = get_addon_prefs().assets_output_folder
         return context.window_manager.invoke_props_dialog(self, width=400)
 
     def draw(self, context):

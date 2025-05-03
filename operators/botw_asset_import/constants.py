@@ -10,7 +10,7 @@ TEXTURE_EXTENSION = ".png"
 DYES = ["Default", "Blue", "Red", "Yellow", "White", "Black", "Purple", "Green", "Light Blue", "Navy", "Orange", "Peach", "Crimson", "Light Yellow", "Brown", "Gray"]
 OBJ_PREFIXES = ["Obj_", "TwnObj_", "TwnObjVillage_", "FldObj_", "DgnObj_", "DgnMrgPrt_"]
 PRIMITIVE_NAMES = ["_polySurface", "_pCylinder", "_pSphere", "_pCube", "_pCone", "_pPlane", "pSolid", "_plantroot", "_pPipe"]
-GARBAGE_MATS = ["InsideArea", "InsideMat"]
+GARBAGE_MATS = ["InsideArea", "InsideMat", "AreaMat"]
 
 # I really wanted to make wind work, but it's impossible to get perfect results from 
 # just the material data because it's all inconsistent nonsense.
@@ -42,9 +42,6 @@ LEAF_WIND_UV_ROTATIONS = {
     'Plant_TreePine_Leaf_B_Alb' : 0,
     'Plant_TreeZoraLow_A_Branch_Alb' : 0,
     'Plant_TreeZoraLow_B_Branch_Alb' : 0,
-
-    'Cloth_GerudoMayerBedRoom_I_Alb' : 0,
-    'Cloth_GerudoMayerBedRoom_K_Alb' : 0,
 }
 WIND_FORCE_USE_HEIGHT = [
     'Plant_ChiliPepper_A_01_Alb',
@@ -61,17 +58,36 @@ WIND_FORCE_USE_HEIGHT = [
     'CmnTex_Plant_Tropical_B_Alb',
     'Plant_VioletCliff_A_Alb',
     'Plant_LightGrass_A_Alb',
+    'Plant_BoneFlowr_A_01_Alb',
 ]
 WIND_FORCE_NOWIND = [
     'CmnTex_Plant_KorokWood_A_01_Alb',
     'Plant_KorokColor_Chg_0_Alb',
     'Plant_Korok_Chg_0_Alb',
+    'Wood_RedBark_A_Alb',
+    'Tree_DekutTunk_A_Alb',
+    'Wood_BridgeWoodRough_A_Alb',
+    'Plant_DamageStem_A_Alb',
+    'Plant_FlowerMarguerite_B_Alb',
+    'Plant_DamageThorn_A_Alb',
+    'Wood_ScaffoldWood_B_Alb',
 ]
 LEAF_ZFIGHT_HACK = [
     # These tree leaf meshes z-fight with the snowy leaves and win, when they shouldn't.
     ('Obj_TreeConiferous_A_Snow_01', 'A21__Mt_Treeleaf_01'),
     ('Obj_TreeConiferous_A_Snow_02', 'A1__Mt_Treeleaf_01'),
     ('Obj_TreeConiferous_A_Snow_03', 'A10__Mt_Treeleaf_01'),
+]
+
+# TODO: Test all Moss textures that have an Alpha channel. 
+# They are probably blended in with vertex painting but that data is probably not stored on the asset, 
+# or at least it didn't get extracted from Switch Toolbox in any case.
+IGNORE_ALPHA = [
+    'CmnTex_Plant_Moss_A_Alb', 
+    'CmnTex_Plant_MossWithered_A_Alb',
+    'Plant_PlayerChapelMoss_B_Alb',
+    'Plant_PlayerChapelMoss_C_Alb',
+    'Plant_PlayerChapelMoss_D_Alb',
 ]
 
 METAL_ROUGHNESS = 0.5

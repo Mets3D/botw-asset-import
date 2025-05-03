@@ -12,7 +12,7 @@ from ...utils.string import increment_name
 from ...utils.customprop import make_property
 
 from .constants import (
-    METAL_ROUGHNESS, DYES, OBJ_PREFIXES, GARBAGE_MATS, TEXTURE_EXTENSION, 
+    METAL_ROUGHNESS, DYES, OBJ_PREFIXES, GARBAGE_MATS, TEXTURE_EXTENSION, IGNORE_ALPHA, 
     cache_get_img_paths, cache_get_mat_defaults, cache_get_shader_data, cache_get_tex_info,
     LEAF_WIND_UV_ROTATIONS, WIND_FORCE_NOWIND, WIND_FORCE_USE_HEIGHT, 
 )
@@ -116,10 +116,10 @@ def guess_shader(collection, obj, material, all_textures):
             fallback_shader = "BotW: Smooth Shade"
             break
 
-    if get_shader_prop_of_mat(material, 'shaderassign>options>uking_material_behave') == 104:
+    if get_shader_prop(material, 'shaderassign>options>uking_material_behave') == 104:
         # TODO: I think this doesn't catch everything, eg. Octarock, Sandworm, Dragon, etc.
         return "BotW: Eye"
-    if get_shader_prop_of_mat(material, 'shaderassign>samplers>_a0') == '_fx0':
+    if get_shader_prop(material, 'shaderassign>samplers>_a0') == '_fx0':
         return "BotW: Ancient Weapon Blade"
     if any(["EmmMsk.1" in img.name for img in all_textures]) and not any([word in material['import_name'].lower() for word in ('handle', '_02')]):
         return "BotW: Elemental Weapon"
@@ -129,8 +129,8 @@ def guess_shader(collection, obj, material, all_textures):
         return "BotW: Generic NPC"
 
     if (
-        get_shader_prop_of_mat(material, 'shaderassign>options>uking_texcoord_toon_spec_srt') == 3 # Strong correspondance to regular Cel shading. (not 100% perfect, eg. Link's earrings) (NOTE: Make sure this is caught AFTER other, more specific types of Cel Shading!)
-        or get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair')==402 # This is the flag for hair Cel shading (3 cels instead of 2 in hair) (I think this is 100%) (It's also the same as `shaderassign>options>uking_material_behave`==100)
+        get_shader_prop(material, 'shaderassign>options>uking_texcoord_toon_spec_srt') == 3 # Strong correspondance to regular Cel shading. (not 100% perfect, eg. Link's earrings) (NOTE: Make sure this is caught AFTER other, more specific types of Cel Shading!)
+        or get_shader_prop(material, 'shaderassign>options>uking_specular_hair')==402 # This is the flag for hair Cel shading (3 cels instead of 2 in hair) (I think this is 100%) (It's also the same as `shaderassign>options>uking_material_behave`==100)
     ):
         return "BotW: Cel Shade"
 
@@ -214,7 +214,12 @@ def guess_sockets_for_textures(material, textures, shader_name) -> OrderedDict[b
             else:
                 socket_map[img] = "Albedo"
         elif type == 'Alpha':
-            socket_map[img] = "Alpha"
+            if any(ignore_alpha in img.name for ignore_alpha in IGNORE_ALPHA):
+                # Very explicitly don't want to hook up this weird texture. 
+                # If anything, add a custom socket for it, but I don't think it's doing anything in-game either.
+                socket_map[img] = "None"
+            else:
+                socket_map[img] = "Alpha"
         elif type == 'Specular':
             socket_map[img] = "SPM"
         elif type == 'Normal':
@@ -331,7 +336,7 @@ def guess_tex_uses_first_uv(material, img, socket_name) -> bool or None:
     # NOTE: TotK equivalent is apparently `o_texture{tex_idx}_texcoord`.
     # Index can be from 0 to 7.
     # Values can be None, 1 to 8
-    uv_idx = get_shader_prop_of_mat(material, f'shaderassign>options>uking_texture{tex_idx}_texcoord')
+    uv_idx = get_shader_prop(material, f'shaderassign>options>uking_texture{tex_idx}_texcoord')
     # This sounds like it should refer to what UVMap is used by a texture at the given index in the texturelist
     # but the fact that it works very often is more of a coincidence of the fact that tex_idx of Albedos is usually 0
     # and the default value of uking_texture0_texcoord is usually None. So, we might as well be returning `"_Alb" in img.name`,
@@ -341,42 +346,48 @@ def guess_tex_uses_first_uv(material, img, socket_name) -> bool or None:
 ### SHADER DATA READING ###
 
 def is_a_tree(material):
-    return get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_lumberjack") == 1
+    return get_shader_prop(material, "shaderassign>options>uking_enable_lumberjack") == 1
 
 def is_blown_by_wind(material, albedo_name=""):
-    """I couldn't find a reliable indicator for this, which is very frustrating. 
-    But there's only a finite number of leaf textures in the game, 
-    so I just hard-coded some data."""
+    """I couldn't find a reliable indicator for this, which is very frustrating."""
 
-    # Other flags I checked, but to no avail:
-    # uking_wind_vtx_transform_channel
-    # shaderassign>options>uking_enable_wind_vtx_transform_coreinfo     # Most of these are indeed blown by the wind, but not nearly all of them.
-    # shaderassign>options>uking_enable_wind_vtx_transform_normal_lock  # Most of these or maybe all of them are NOT blown by the wind. Maybe this indicates that objects that are blown by the wind should collide with this material, but I doubt that.
+    if not albedo_name:
+        textures = get_shader_prop(material, 'TextureMaps')
+        if textures:
+            albedo_name = next((name for name, data in textures.items() if "_Alb" in name), "")
 
-    wind_enable = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_wind_vtx_transform")
-    wind_enable_lie = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_wind_vtx_transform_lie")
-    wind_enable_height = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_wind_vtx_transform_height")
-
-    wind_int = get_shader_prop_of_mat(material, "matparam>uking_wind_vtx_transform_intensity>ValueFloat", index=0)
-    wind_lie_int = get_shader_prop_of_mat(material, "matparam>uking_wind_vtx_transform_lie_intensity>ValueFloat", index=0)
-    wind_height_int = get_shader_prop_of_mat(material, "matparam>uking_wind_vtx_transform_lie_height>ValueFloat", index=0)
-
-    uses_a_windy_albedo = (albedo_name in LEAF_WIND_UV_ROTATIONS or albedo_name in WIND_FORCE_USE_HEIGHT)
+    # By adding only a handful of hard-coded exceptions, guessing when a material should be blown by wind can become pretty accurate. 
+    # False negatives are hard to find but not nearly as important as false positives.
     force_no_wind = albedo_name in WIND_FORCE_NOWIND
+    if force_no_wind or is_a_tree(material):
+        return False
+
+    # NOTE: I do allow some false-positives where it looks good, eg. plants that can be picked up by the player are not blown by wind in-game but it looks fine.
+    # 141 assets.
+    wind_enable = get_shader_prop(material, "shaderassign>options>uking_enable_wind_vtx_transform") == 1 and get_shader_prop(material, "matparam>uking_wind_vtx_transform_intensity>ValueFloat", index=0) not in (0.1, None)
+    # 71 assets, 42 of them new.
+    wind_enable_lie = get_shader_prop(material, "shaderassign>options>uking_enable_wind_vtx_transform_lie") == 1 and get_shader_prop(material, "matparam>uking_wind_vtx_transform_lie_intensity>ValueFloat", index=0) != 3.0
+    # 159 assets, 69 of them new.
+    wind_enable_height = get_shader_prop(material, "shaderassign>options>uking_enable_wind_vtx_transform_height") == 1
+    # NOTE: shaderassign>options>uking_enable_wind_vtx_transform_coreinfo == 1: 71 assets, 24 of them new. Mostly false positives
+    # NOTE: shaderassign>options>uking_material_behave == 105: 667 assets, 496 of them new. Pretty much exclusively false positives.
+    # NOTE: shaderassign>options>uking_wind_vtx_transform_channel == 41 shaderassign>options>uking_enable_wind_vtx_transform_normal_lock != 1: 805 assets, 630 of them new, mostly false positives or arguable at best.
+
+    # 101 assets, 64 of them new, a small handful of false positives (especially the core of crowns of palm trees, meh.)
+    uses_a_windy_albedo = (albedo_name in LEAF_WIND_UV_ROTATIONS or albedo_name in WIND_FORCE_USE_HEIGHT)
     wind_enabled = (
-        (
-            (wind_enable_height and wind_height_int != 0.5) or
-            (wind_enable_lie and wind_lie_int != 3.0) or
-            (wind_enable and wind_int != 0.1) or
-            uses_a_windy_albedo
-        ) and
-        not is_a_tree(material) and
-        not force_no_wind
+        wind_enable_height or
+        wind_enable_lie or
+        wind_enable or
+        uses_a_windy_albedo
     )
+    # In total, only 398 materials across 297 assets return True here 
+    # which probably doesn't cover anywhere close to all things that should be blown by wind, 
+    # but I give up.
     return wind_enabled
 
 def is_water(material) -> bool:
-    textures = get_shader_prop_of_mat(material, 'TextureMaps')
+    textures = get_shader_prop(material, 'TextureMaps')
     if not textures:
         return False
 
@@ -394,14 +405,14 @@ def is_water(material) -> bool:
     return False
 
 def is_waterfall(material) -> bool:
-    textures = get_shader_prop_of_mat(material, 'TextureMaps')
+    textures = get_shader_prop(material, 'TextureMaps')
     if not textures:
         return False
 
     return any_in_any(['CmnWaterFall'], textures)
 
 def is_malice(material) -> bool:
-    textures = get_shader_prop_of_mat(material, 'TextureMaps')
+    textures = get_shader_prop(material, 'TextureMaps')
     if not textures:
         return False
 
@@ -411,8 +422,15 @@ def is_malice(material) -> bool:
 
     return False
 
+def is_waterfall(material) -> bool:
+    textures = get_shader_prop(material, 'TextureMaps')
+    if not textures:
+        return False
+
+    return any_in_any(['CmnWaterFall'], textures)
+
 def is_lava(material) -> bool:
-    textures = get_shader_prop_of_mat(material, 'TextureMaps')
+    textures = get_shader_prop(material, 'TextureMaps')
     if not textures:
         return False
 
@@ -423,7 +441,7 @@ def any_in_any(words, textures) -> bool:
     return any([any([word in texture for word in words]) for texture in textures])
 
 def get_tex_data(material, img) -> dict:
-    tex_maps = get_shader_prop_of_mat(material, 'TextureMaps')
+    tex_maps = get_shader_prop(material, 'TextureMaps')
     if not tex_maps:
         return {}
     img_name = Path(img.filepath).stem
@@ -432,13 +450,16 @@ def get_tex_data(material, img) -> dict:
         tex_data = next((data for name, data in tex_maps.items() if name == "Far_"+img_name), {})
     return tex_data
 
-def get_shader_prop_of_mat(material, prop_path, index=None):
-    shader_data = get_shader_data(material)
-    if not shader_data:
-        return "N/A"
-    return get_shader_prop(shader_data, prop_path, index)
+def get_shader_prop(shader_or_material, prop_path, index=None):
+    if type(shader_or_material) == bpy.types.Material:
+        shader_data = get_shader_data(shader_or_material)
+        if not shader_data:
+            return "N/A"
+    elif type(shader_or_material) == dict:
+        shader_data = shader_or_material
+    else:
+        assert False, "This should be a material or a dictionary: "+str(shader_or_material)
 
-def get_shader_prop(shader_data, prop_path, index=None):
     prop = shader_data
     for part in prop_path.split(">"):
         if isinstance(prop, dict):
@@ -484,9 +505,9 @@ def get_indicies_for_material_blend(material):
 
     for i in range(5):
         # Skipping last value on purpose because it's the same value across the whole game.
-        val = get_shader_prop_of_mat(material, f'matparam>texture_array_index{i}>ValueFloat')
+        val = get_shader_prop(material, f'matparam>texture_array_index{i}>ValueFloat')
         tex_array_index_props.append(val)
-        shader_array_index_props.append(get_shader_prop_of_mat(material, f'shaderassign>options>uking_texture_array_texture{i}'))
+        shader_array_index_props.append(get_shader_prop(material, f'shaderassign>options>uking_texture_array_texture{i}'))
 
     all_default = all([v==-1 for v in shader_array_index_props])
     tex_indicies = []
@@ -514,7 +535,7 @@ def get_alpha_mode(material) -> str:
     """Trying to guess what EEVEE alpha blending mode to use based on the 
     horrendous material data available."""
 
-    alpha_flag = get_shader_prop_of_mat(material, 'MaterialU>RenderState>_flags') or 1
+    alpha_flag = get_shader_prop(material, 'MaterialU>RenderState>_flags') or 1
 
     # NOTE: The keys are all the keys that occur in the game's materials, but the values are my guesses.
     zelda_blend_modes = {
@@ -526,7 +547,7 @@ def get_alpha_mode(material) -> str:
     }
     blend_mode = zelda_blend_modes.get(alpha_flag, "AlphaMask")
 
-    maybe_translucency_flag = get_shader_prop_of_mat(material, 'shaderassign>options>gsys_gbuffer_xlu')
+    maybe_translucency_flag = get_shader_prop(material, 'shaderassign>options>gsys_gbuffer_xlu')
     if maybe_translucency_flag:
         return 'BLENDED'
     # shaderassign.options.uking_enable_gbuffer_xlu_blend
@@ -537,23 +558,23 @@ def get_alpha_mode(material) -> str:
 def is_transparent(material):
     # Switch Toolbox is definitely not always correct about its isTransparent flag, 
     # eg. Mt_Builparts_HyruleCastleInside_SpiderWeb_A has it on False.
-    texture_maps = get_shader_prop_of_mat(material, 'TextureMaps')
+    texture_maps = get_shader_prop(material, 'TextureMaps')
     if not texture_maps:
         return False
     if any(("Him" in name for name, data in texture_maps.items())):
         return False
 
-    switch_toolbox_thinks = get_shader_prop_of_mat(material, 'isTransparent') != 1
+    switch_toolbox_thinks = get_shader_prop(material, 'isTransparent') != 1
     alb_node = get_albedo_img_node(material)
     albedo_has_alpha = None
     if alb_node:
         albedo_has_alpha = PixelImage.from_blender_image(alb_node.image).has_alpha
-    # i_think = get_shader_prop_of_mat(material, 'shaderassign>options>gsys_gbuffer_xlu') == 1
+    # i_think = get_shader_prop(material, 'shaderassign>options>gsys_gbuffer_xlu') == 1
     return switch_toolbox_thinks or albedo_has_alpha
 
 def get_color_values(material) -> list[Vector]:
     colors = []
-    matparam = get_shader_prop_of_mat(material, 'matparam')
+    matparam = get_shader_prop(material, 'matparam')
     if not matparam:
         return colors
     for name, data in matparam.items():
@@ -718,8 +739,8 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
     lc_assetname = (collection.get('asset_name') or "").lower()
 
     links = material.node_tree.links
-    behave = get_shader_prop_of_mat(material, 'shaderassign>options>uking_material_behave')
-    metal_color = get_shader_prop_of_mat(material, 'shaderassign>options>uking_metal_color')
+    behave = get_shader_prop(material, 'shaderassign>options>uking_material_behave')
+    metal_color = get_shader_prop(material, 'shaderassign>options>uking_metal_color')
 
     # Hardcode some other values.
     if collection['asset_name'] == "Majora's Mask":
@@ -765,10 +786,10 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         # On the leaves it's no longer necessary since I use Displacement to pull apart z-fighting planes,
         # and this value is set on branch materials which are obviously double-sided in-game.
         # material.use_backface_culling = get_shader_property(material, 'shaderassign.options.uking_enable_backface_modify') == 1
-        wind_intensity = get_shader_prop_of_mat(material, "matparam>uking_wind_vtx_transform_intensity>ValueFloat")
+        wind_intensity = get_shader_prop(material, "matparam>uking_wind_vtx_transform_intensity>ValueFloat")
         if wind_intensity:
             set_socket_value(shader_node, 'Wind Intensity', min(wind_intensity, 0.1))
-        wind_use_height = get_shader_prop_of_mat(material, "shaderassign>options>uking_enable_wind_vtx_transform_height")
+        wind_use_height = get_shader_prop(material, "shaderassign>options>uking_enable_wind_vtx_transform_height")
         if not wind_use_height:
             albedo = get_albedo_img_node(material)
             if albedo and albedo.image and os.path.splitext(albedo.image.name)[0] in WIND_FORCE_USE_HEIGHT:
@@ -792,7 +813,7 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         # TODO: Check if other behave/metal_color value combos should also be metal.
         metal = True
 
-    if get_shader_prop_of_mat(material, 'shaderassign>options>uking_specular_hair') == 402:
+    if get_shader_prop(material, 'shaderassign>options>uking_specular_hair') == 402:
         set_socket_value(shader_node, "Hair", True)
     elif metal:
         set_socket_value(shader_node, "Metal", True)
@@ -895,7 +916,7 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
             material.surface_render_method = get_alpha_mode(material)
         # Since transparency doesn't (always) get its own texture node, hook up the Alpha of the Albedo.
         alpha_socket = shader_node.inputs.get('Alpha')
-        if socket_name in ('Albedo', 'Fx Texture Distorted') and is_transparent(material) and pixel_image.has_alpha:
+        if socket_name in ('Albedo', 'Fx Texture Distorted') and is_transparent(material) and pixel_image.has_alpha and not any(ignore_alpha in img.name for ignore_alpha in IGNORE_ALPHA):
             if alpha_socket and len(alpha_socket.links) == 0 and 'Alpha' in img_node.outputs:
                 links.new(img_node.outputs['Alpha'], alpha_socket)
         # But if after those steps we didn't hook up any alpha, don't set it to Blended, since that will cause sorting issues.
@@ -1061,7 +1082,7 @@ def load_assigned_json_textures(material) -> list[bpy.types.Image]:
     we extracted from the .bmat using my modified version of Switch Toolbox.
     """
 
-    texture_maps = get_shader_prop_of_mat(material, 'TextureMaps')
+    texture_maps = get_shader_prop(material, 'TextureMaps')
     if not texture_maps:
         return []
 

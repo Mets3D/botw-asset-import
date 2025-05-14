@@ -404,13 +404,6 @@ def is_water(material) -> bool:
     
     return False
 
-def is_waterfall(material) -> bool:
-    textures = get_shader_prop(material, 'TextureMaps')
-    if not textures:
-        return False
-
-    return any_in_any(['CmnWaterFall'], textures)
-
 def is_malice(material) -> bool:
     textures = get_shader_prop(material, 'TextureMaps')
     if not textures:

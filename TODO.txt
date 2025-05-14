@@ -1,5 +1,3 @@
-- 'shaderassign>options>uking_material_behave' : 103 seems to be water, should check if our current function gives the same result or not.
-- 'shaderassign>options>uking_material_behave' : 105 might be things affected by wind, it's mostly leaves and plants, but maybe also includes the clothes!? that would be great!!
 - 'shaderassign>options>uking_material_behave' : 102 is always glass but I'm not sure if it is all glass. Either way, we could add some treatment for it.
 
 - The add-on probably doesn't work with mods right now, since we assume we can find every material in the add-on's own database, which is probably not true for mods!
@@ -8,6 +6,8 @@ Importer feature ideas:
     - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece. Could be fun to store and add related functionality to the BlankFile.blend scripts.
 
 Map Importer TODOs:
+    - Import map section should also start with the asset blank file (with the lights and stuff). Or I guess just append all the stuff like the asset importer does.
+
     Terrain
         - I started trying to refactor bmubin
             - We always loop over the whole grid, but skip certain blocks depending on what's returned by lod_ignore(), which is dumb.

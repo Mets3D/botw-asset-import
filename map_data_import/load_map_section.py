@@ -18,11 +18,6 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
     bl_label = "BotW: Import Map Section"
     bl_options = {'REGISTER', 'UNDO'}
 
-    blend_dir: StringProperty(
-        name="Asset Folder", 
-        subtype='DIR_PATH', 
-        description="Folder where the .blend files containing the map's assets can be found. Missing assets will be printed to the system console.", 
-    )
     map_section: EnumProperty(
         name="Map Section", 
         description="Section of the map to import",
@@ -36,14 +31,13 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
     )
 
     def invoke(self, context, _event):
-        self.blend_dir = get_addon_prefs().assets_output_folder
         return context.window_manager.invoke_props_dialog(self, width=400)
 
     def draw(self, context):
         layout = self.layout
         layout.use_property_split=True
         layout.use_property_decorate=False
-        layout.prop(self, 'blend_dir')
+        layout.prop(get_addon_prefs(context), 'assets_output_folder')
         layout.prop(self, 'map_section')
 
     def execute(self, context):
@@ -60,10 +54,12 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
         total = len(dynamic_assets) + len(static_assets)
         bar_format = "{n_fmt}/{total_fmt} {bar}"
 
+        prefs = get_addon_prefs(context)
+
         with tqdm(total=total, bar_format=bar_format) as pbar:
             for is_dynamic, assets in zip((True, False), (dynamic_assets, static_assets)):
                 for asset_name, data in assets.items():
-                    asset_blend = os.path.join(self.blend_dir, asset_name+".blend")
+                    asset_blend = os.path.join(prefs.assets_output_folder, asset_name+".blend")
                     coll_linked_asset = None
                     if os.path.isfile(asset_blend):
                         coll_linked_asset = ensure_lib_datablock('collections', asset_name, blend_path=asset_blend, link=True)

@@ -1,6 +1,7 @@
 import bpy, os, glob, sys, time, subprocess, shutil, json, io, zipfile
 from bpy.props import BoolProperty, StringProperty, IntProperty, EnumProperty
 import pickle
+from pathlib import Path
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import shared_memory
@@ -143,7 +144,12 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
     dae_map: StringProperty()
 
     def invoke(self, context, _event):
-        self.target_dir = get_addon_prefs().assets_output_folder
+        prefs = get_addon_prefs(context)
+        if not prefs.assets_output_folder and prefs.game_models_folder:
+            # Auto-initialize it to a sibling of the chosen textures folder.
+            prefs.assets_output_folder = os.path.dirname(os.path.normpath(prefs.game_models_folder)) + os.sep + "Asset Library"
+        self.target_dir = prefs.assets_output_folder
+
         self.count_dae(context)
         return context.window_manager.invoke_props_dialog(self, width=400)
 

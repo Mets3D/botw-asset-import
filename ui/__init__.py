@@ -1,5 +1,6 @@
 module_names = (
     "ui_asset_metadata",
+    "import_menu",
 )
 
 

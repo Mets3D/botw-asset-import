@@ -1,4 +1,3 @@
-from multiprocessing.spawn import prepare
 import bpy, os, glob
 from bpy.props import BoolProperty, StringProperty
 from math import pi
@@ -45,6 +44,11 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     deduplicate_materials: BoolProperty(name="Deduplicate Materials", description="If two materials end up with identical nodetrees, merge them into one. It's difficult to verify that this doesn't break anything, so be careful. It's not a big deal if some materials are duplicates anyways", default=False)
 
     force_update_caches: BoolProperty(default=False)
+
+    def invoke(self, context, _event):
+        self.directory = get_addon_prefs(context).game_models_folder
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
 
     def draw(self, context):
         layout = self.layout
@@ -340,13 +344,8 @@ def cleanup_fbx_armature(context, fbx_arm):
 
 ### Registry
 
-def menu_func_import(self, context):
-    self.layout.operator(OUTLINER_OT_import_botw_dae_and_fbx.bl_idname, text="BotW (.dae & .fbx)")
-
 def register():
     bpy.utils.register_class(OUTLINER_OT_import_botw_dae_and_fbx)
-    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
 def unregister():
     bpy.utils.unregister_class(OUTLINER_OT_import_botw_dae_and_fbx)
-    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)

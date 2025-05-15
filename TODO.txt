@@ -4,21 +4,18 @@
 Importer feature ideas:
     - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece. Could be fun to store and add related functionality to the BlankFile.blend scripts.
 
-Map Importer TODOs:
-    - Import map section should also start with the asset blank file (with the lights and stuff). Or I guess just append all the stuff like the asset importer does.
-
-    Terrain
-        - I started trying to refactor bmubin
-            - We always loop over the whole grid, but skip certain blocks depending on what's returned by lod_ignore(), which is dumb.
-        - I made a very quick and dirty test of the material, but it will have to be generated procedurally in order to keep memory usage to a minimum (only load necessary textures for a given chunk)
-            - Mix together all used material0 albedos (with most common to least common, generate nodes top to bottom, left to right.)
-            - Repeat for material0 normals
-            - Repeat for material1 albedos
-            - Repeat for material1 normals
-            - Geometry Position is plugged into every texture node. Can insert a mapping node inbetween as well for UV scale control.
-            - At the end, blend the resulting combined material0 and material1 into the final blended albedo/normal
-            - Hook up to some linked nodegroup so that if multiple chunks are present, their shading can be edited together.
-            - Check if normal map Z channel is working as intended, it's yellow to start, sus.
+Terrain TODO
+    - I started trying to refactor bmubin
+        - We always loop over the whole grid, but skip certain blocks depending on what's returned by lod_ignore(), which is dumb.
+    - I made a very quick and dirty test of the material, but it will have to be generated procedurally in order to keep memory usage to a minimum (only load necessary textures for a given chunk)
+        - Mix together all used material0 albedos (with most common to least common, generate nodes top to bottom, left to right.)
+        - Repeat for material0 normals
+        - Repeat for material1 albedos
+        - Repeat for material1 normals
+        - Geometry Position is plugged into every texture node. Can insert a mapping node inbetween as well for UV scale control.
+        - At the end, blend the resulting combined material0 and material1 into the final blended albedo/normal
+        - Hook up to some linked nodegroup so that if multiple chunks are present, their shading can be edited together.
+        - Check if normal map Z channel is working as intended, it's yellow to start, sus.
 
 Extraction tutorial:
     - Add images or videos of the resulting imported shaders and animations

@@ -31,6 +31,8 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
     )
 
     def invoke(self, context, _event):
+        self.org_pref = context.preferences.view.filebrowser_display_type
+        context.preferences.view.filebrowser_display_type = 'WINDOW'
         return context.window_manager.invoke_props_dialog(self, width=400)
 
     def draw(self, context):
@@ -114,6 +116,8 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
             parent.children.link(coll)
             coll_root_temp.children.unlink(coll)
         bpy.data.collections.remove(coll_root_temp)
+
+        context.preferences.view.filebrowser_display_type = self.org_pref
 
         return {'FINISHED'}
 

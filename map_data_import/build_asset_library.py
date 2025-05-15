@@ -143,6 +143,9 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
     dae_map: StringProperty()
 
     def invoke(self, context, _event):
+        self.org_pref = context.preferences.view.filebrowser_display_type
+        context.preferences.view.filebrowser_display_type = 'WINDOW'
+
         prefs = get_addon_prefs(context)
         if not prefs.assets_output_folder and prefs.game_models_folder:
             # Auto-initialize it to a sibling of the chosen textures folder.
@@ -180,6 +183,8 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         assert os.path.exists(self.target_dir) and not os.path.isfile(self.target_dir), "Output folder not found: "+self.target_dir
         dae_to_blend_map = json.loads(self.dae_map)
         build_asset_library(dae_to_blend_map, self.quiet, self.blender_instances)
+        
+        context.preferences.view.filebrowser_display_type = self.org_pref
         return {'FINISHED'}
 
 all_dae_paths_cached = []

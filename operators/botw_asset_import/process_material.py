@@ -40,24 +40,24 @@ def process_mat(collection, obj, material) -> bpy.types.Material or None:
 
     ### IN SOME CASES, SIMPLY REPLACE THIS MATERIAL. ###
 
-    # if is_waterfall(material):
-    #     # I hooked up these material settings to object properties so they can be controlled per-object.
-    #     # This way we don't need to duplicate the water material, but instead all water can share just the one.
-    #     make_property(obj, 'flow_speed', -5.0, min=-1000, max=1000, soft_min=-10, soft_max=10)
-    #     make_property(obj, 'flow_axis', 1.0)
-    #     return ensure_lib_datablock('materials', "BotW Water")
-    # elif is_water(material):
-    #     make_property(obj, 'flow_speed', 0.75, min=-1000, max=1000, soft_min=-10, soft_max=10)
-    #     make_property(obj, 'flow_axis', 0.0)
-    #     return ensure_lib_datablock('materials', "BotW Water")
-    # elif is_lava(material):
-    #     make_property(obj, 'flow_speed', 0.2, min=-1000, max=1000, soft_min=-10, soft_max=10)
-    #     make_property(obj, 'flow_axis', 1.0)
-    #     return ensure_lib_datablock('materials', "BotW Lava")
-    # elif is_malice(material):
-    #     make_property(obj, 'malice_speed', 1.0, min=-10, max=10)
-    #     make_property(obj, 'malice_glow', 1.0, min=0, max=10)
-    #     return ensure_lib_datablock('materials', "BotW Malice")
+    if is_waterfall(material):
+        # I hooked up these material settings to object properties so they can be controlled per-object.
+        # This way we don't need to duplicate the water material, but instead all water can share just the one.
+        make_property(obj, 'flow_speed', -5.0, min=-1000, max=1000, soft_min=-10, soft_max=10)
+        make_property(obj, 'flow_axis', 1.0)
+        return ensure_lib_datablock('materials', "BotW Water")
+    elif is_water(material):
+        make_property(obj, 'flow_speed', 0.75, min=-1000, max=1000, soft_min=-10, soft_max=10)
+        make_property(obj, 'flow_axis', 0.0)
+        return ensure_lib_datablock('materials', "BotW Water")
+    elif is_lava(material):
+        make_property(obj, 'flow_speed', 0.2, min=-1000, max=1000, soft_min=-10, soft_max=10)
+        make_property(obj, 'flow_axis', 1.0)
+        return ensure_lib_datablock('materials', "BotW Lava")
+    elif is_malice(material):
+        make_property(obj, 'malice_speed', 1.0, min=-10, max=10)
+        make_property(obj, 'malice_glow', 1.0, min=0, max=10)
+        return ensure_lib_datablock('materials', "BotW Malice")
 
     ### IN SOME CASES, SIMPLY HIDE THIS OBJECT. ###
 

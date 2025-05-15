@@ -119,6 +119,9 @@ def guess_shader(collection, obj, material, all_textures):
     if get_shader_prop(material, 'shaderassign>options>uking_material_behave') == 104:
         # TODO: I think this doesn't catch everything, eg. Octarock, Sandworm, Dragon, etc.
         return "BotW: Eye"
+    if any(["Glass" in img.name and "RitoLight" not in img.name for img in all_textures]) or "Mt_Lens" in material.name:
+        #get_shader_prop(material, 'shaderassign>options>uking_material_behave') == 102:
+        return "BotW: Glass"
     if get_shader_prop(material, 'shaderassign>samplers>_a0') == '_fx0':
         return "BotW: Ancient Weapon Blade"
     if any(["EmmMsk.1" in img.name for img in all_textures]) and not any([word in material['import_name'].lower() for word in ('handle', '_02')]):
@@ -169,7 +172,8 @@ def guess_sockets_for_textures(material, textures, shader_name) -> OrderedDict[b
     for img in textures:
         tex_data = get_tex_data(material, img)
         print(material.name, img.name)
-        assert tex_data != {}
+        if not tex_data:
+            continue
         type = tex_data['Type'].strip()
         if type == 'Unknown':
             sampler = tex_data['SamplerName']
@@ -741,14 +745,11 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         set_socket_value(shader_node, 'Fake Rimlights', 0.0)
         set_socket_value(shader_node, 'Sketch Highlight Spread', 0.0)
         return False
+    if "Mt_Lens" in material['import_name']:
+        set_socket_value(shader_node, 'Alpha', 0.2)
     if 'ancient' in lc_assetname:
         # TODO: Is this still necessary?
         set_socket_value(shader_node, 'Emission Color', [1.000000, 0.245151, 0.025910, 1.000000])
-    if material['import_name'] in ('Mt_Lens', 'Mt_Glass'):
-        # TODO: Could probably hunt down a more reliable way to catch glass.
-        # ('shaderassign>options>uking_material_behave' : 102)
-        # This catches Tingle's clockface and Hylian glasses. I know there's also some glass outside of one of the tech labs.
-        set_socket_value(shader_node, 'Alpha', 0.05)
     if collection['asset_name'] == 'Fierce Deity Mask' and material['import_name'] == 'Mt_Eyeemm':
         set_socket_value(shader_node, 'Emission Color', [0.700000, 0.700000, 0.700000, 1.000000])
         set_socket_value(shader_node, 'Emission Mask', 1.0)

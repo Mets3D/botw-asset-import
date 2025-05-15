@@ -1,5 +1,3 @@
-- 'shaderassign>options>uking_material_behave' : 102 is always glass but I'm not sure if it is all glass. Either way, we could add some treatment for it.
-
 - The add-on probably doesn't work with mods right now, since we assume we can find every material in the add-on's own database, which is probably not true for mods!
 - It also can't import arbitrary mubins, since the map asset database just ships with the addon.
 
@@ -35,8 +33,6 @@ Asset pack release:
         Also show off SculptableTerrain.blend, maybe as a separate video.
             Could change the Blender image names of the terrain materials based on bmubin/linked_resources/json/terrainmat_names.json.
                 But since we already zipped and uploaded, that has to be re-done. not worth.
-
-- I tweaked Switch Toolbox to use a . for separator between object and material name, but now need to pack it up as a release build again if I want it to be available for others... sigh.
 
 Should update the Kena and Witcher 3 asset libraries as well, if they even need to be updated, but probably yes. 
     For example, I don't think I marked Kena animations as assets, but might as well.

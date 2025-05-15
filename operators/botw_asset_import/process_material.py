@@ -91,7 +91,7 @@ def process_mat(collection, obj, material) -> bpy.types.Material or None:
     elif shader_name == 'BotW: Cel Shade':
         albedo = next((img for img, socket_name in socket_map.items() if socket_name=='Albedo'), None)
         if albedo and "." in os.path.splitext(albedo.name)[0]:
-            dye_textures = guess_dye_textures(albedo)
+            dye_textures = load_dye_textures(albedo)
             socket_map.update([(tex, 'Albedo') for tex in dye_textures])
 
     ### CREATE THE NODE TREE. ###
@@ -117,7 +117,7 @@ def guess_shader(collection, obj, material, all_textures):
             break
 
     if get_shader_prop(material, 'shaderassign>options>uking_material_behave') == 104:
-        # TODO: I think this doesn't catch everything, eg. Octarock, Sandworm, Dragon, etc.
+        # This doesn't and shouldn't catch ALL eyes, only the ones that should have a fake highlight.
         return "BotW: Eye"
     if any(["Glass" in img.name and "RitoLight" not in img.name for img in all_textures]) or "Mt_Lens" in material.name:
         #get_shader_prop(material, 'shaderassign>options>uking_material_behave') == 102:
@@ -230,7 +230,7 @@ def guess_sockets_for_textures(material, textures, shader_name) -> OrderedDict[b
             socket_map[img] = "Normal Map"
         elif type == 'Emission':
             if "EmmMsk.1" in img.name:
-                # TODO: sampler type _e01 might be a better indicator than EmmMsk.1 in the name.
+                # NOTE: sampler type _e01 might be a better indicator than EmmMsk.1 in the name, but I cba to confirm, this works.
                 socket_map[img] = "Emission Scroll"
             else:
                 socket_map[img] = "Emission Mask"
@@ -731,26 +731,25 @@ def ensure_UV_node(object, material, img_node, socket_name, shader_name):
             links.new(fallback_node.outputs[0], img_node.inputs[0])
 
 def set_shader_socket_values(collection, obj, material, shader_node, spm_has_green):
+    """Hardcode some shader values."""
     lc_obname = obj.name.lower()
     lc_dirname = (collection.get('dirname') or "").lower()
-    lc_assetname = (collection.get('asset_name') or "").lower()
+    mat_name = material['import_name']
 
     links = material.node_tree.links
     behave = get_shader_prop(material, 'shaderassign>options>uking_material_behave')
     metal_color = get_shader_prop(material, 'shaderassign>options>uking_metal_color')
 
-    # Hardcode some other values.
     if collection['asset_name'] == "Majora's Mask":
         set_socket_value(shader_node, 'Emission Strength', 1.0)
         set_socket_value(shader_node, 'Fake Rimlights', 0.0)
         set_socket_value(shader_node, 'Sketch Highlight Spread', 0.0)
         return False
-    if "Mt_Lens" in material['import_name']:
+    if "Mt_Lens" in mat_name:
         set_socket_value(shader_node, 'Alpha', 0.2)
-    if 'ancient' in lc_assetname:
-        # TODO: Is this still necessary?
-        set_socket_value(shader_node, 'Emission Color', [1.000000, 0.245151, 0.025910, 1.000000])
-    if collection['asset_name'] == 'Fierce Deity Mask' and material['import_name'] == 'Mt_Eyeemm':
+    if "Eye" in mat_name or "Octarock" in mat_name:
+        set_socket_value(shader_node, 'Sketch Highlight Spread', 0.0)
+    if collection['asset_name'] == 'Fierce Deity Mask' and mat_name == 'Mt_Eyeemm':
         set_socket_value(shader_node, 'Emission Color', [0.700000, 0.700000, 0.700000, 1.000000])
         set_socket_value(shader_node, 'Emission Mask', 1.0)
         if shader_node.inputs['Emission Mask'].links:
@@ -804,7 +803,6 @@ def set_shader_socket_values(collection, obj, material, shader_node, spm_has_gre
         (behave == 1) or 
         (behave == 2 and metal_color == 2)
     ):
-        # TODO: Check if other behave/metal_color value combos should also be metal.
         metal = True
 
     if get_shader_prop(material, 'shaderassign>options>uking_specular_hair') == 402:
@@ -955,7 +953,6 @@ def hookup_rgb_nodes(material, shader_node):
                     is_albedo = True
             if not is_albedo:
                 links.new(color_nodes[0].outputs[0], shader_node.inputs['Emission Color'])
-                set_socket_value(shader_node, "Emission Strength", 0.1)
 
 ### SHADER NODE (READING ONLY) ###
 
@@ -1053,8 +1050,8 @@ def get_image_path(image_name: str) -> str:
     image_name = Path(image_name).stem
     return image_paths.get(image_name, "")
 
-def guess_dye_textures(albedo) -> list[bpy.types.Image]:
-    """Find alt textures of an albedo.""" # TODO: rename this function to load_dye_textures
+def load_dye_textures(albedo) -> list[bpy.types.Image]:
+    """Find alt textures of an albedo."""
     img = albedo
     dye_textures = []
     next_name = albedo.name

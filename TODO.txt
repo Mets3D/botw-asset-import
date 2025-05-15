@@ -27,6 +27,7 @@ Extraction tutorial:
 Asset pack release:
     - Need to re-do Obj_Objects because a bunch of objects have no textures assigned for some reason.
     - Need to re-do Obj_Fauna to fix transparency and add wind.
+    - Kinda need to re-do everything because the shaders are completely different now... Yikes.
 
     Make a video showing off the whole asset library with the help of the convenience scripts in BlankFile.
         Remember to start off with factory settings or at least auto-run py scripts disabled, so I can show off the pop-up.

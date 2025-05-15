@@ -20,9 +20,8 @@ from .constants import (
 ### MAIN MATERIAL PROCESSING FUNCTION ###
 
 def process_mat(collection, obj, material) -> bpy.types.Material or None:
-    """My best effort at setting up materials based on data exported from my custom 
-    Switch Toolbox, and included in this add-on inside materials.zip.
-    """
+    """My best effort at setting up materials based on whatever material data could be extracted from the game.
+    And just writing a bunch of if statements for the texture names..."""
 
     ### STORE SHADER DATA. ###
 
@@ -73,6 +72,14 @@ def process_mat(collection, obj, material) -> bpy.types.Material or None:
         # This material was already processed, skip.
         # NOTE: Could be useful to allow re-processing while developing this add-on, but I tend to just delete and re-import everything.
         return
+
+    # Check if any objects that use this material have >1 UVMap. Important for hooking up textures.
+    user_map = bpy.data.user_map()
+    users = user_map[material]
+    for user in users:
+        if type(user) != bpy.types.Mesh:
+            continue
+        material['num_uv_layers'] = len(user.uv_layers)
 
     ### GUESS AND LOAD SHADER AND TEXTURES. ###
     
@@ -163,7 +170,7 @@ def guess_shader(collection, obj, material, all_textures):
             material['WARNING'] = "Using material blend shader because there is a vertex color and >1 albedos."
             return "BotW: Material Blend"
 
-    material['FALLBACK USED'] = "Couldn't confidently guess the shader type of this material, but fell back to a default."
+    # material['FALLBACK USED'] = "Couldn't confidently guess the shader type of this material, but fell back to a default."
     return fallback_shader
 
 def guess_sockets_for_textures(material, textures, shader_name) -> OrderedDict[bpy.types.Image, str]:
@@ -171,7 +178,6 @@ def guess_sockets_for_textures(material, textures, shader_name) -> OrderedDict[b
     tex_types = []
     for img in textures:
         tex_data = get_tex_data(material, img)
-        print(material.name, img.name)
         if not tex_data:
             continue
         type = tex_data['Type'].strip()
@@ -229,8 +235,8 @@ def guess_sockets_for_textures(material, textures, shader_name) -> OrderedDict[b
         elif type == 'Normal':
             socket_map[img] = "Normal Map"
         elif type == 'Emission':
-            if "EmmMsk.1" in img.name:
-                # NOTE: sampler type _e01 might be a better indicator than EmmMsk.1 in the name, but I cba to confirm, this works.
+            if "EmmMsk" in img.name:
+                # NOTE: sampler type _e01 might be a better indicator but I cba to confirm, this works.
                 socket_map[img] = "Emission Scroll"
             else:
                 socket_map[img] = "Emission Mask"
@@ -300,12 +306,8 @@ def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
         # Red channel is actual emission mask, green is a gradient for how charged the weapon is,
         # but in the shader I just use a UV gradient instead of the green channel.
         return "Emission Mask"
-
     elif "_emmmsk.1" in lc_img_name or "_emmmsk" in lc_img_name:
         # It's a scrolling texture for the glow.
-        return "Emission Scroll"
-    elif "_emmmsk" in lc_img_name:
-        # Regular scrolling textures for most of the game.
         return "Emission Scroll"
     elif "_emm" in lc_img_name:
         return "Emission Mask"
@@ -318,34 +320,33 @@ def guess_socket_name(img, shader_name="BotW: Cel Shade") -> str:
 
     return ""
 
-def guess_tex_uses_first_uv(material, img, socket_name) -> bool or None:
+def guess_tex_uses_first_uv(material, shader_name, img, socket_name) -> bool or None:
     """Trying to make an educated guess but I really wish I could find a sure way to tell what texture uses what UVMap."""
+    lc_img_name = img.name.lower()
+
     if socket_name in ('Skin Red Albedo', 'Skin Damage Albedo'):
         return True
     tex_data = get_tex_data(material, img)
     if not tex_data:
         return True
-    tex_idx = tex_data['textureUnit'] - 1
     if tex_data['SamplerName'] == "_fx0":
         return True
-
-    # There are some values that sound relevant but I can't find solid correlations...
-
-    # Possible values: None, 1
-    # enable_texcoord = get_shader_property(material, f'shaderassign>options>uking_enable_texcoord{<0 to 5>}')
-
-    # Possible values: None, 1, 2, 3, 10, 11, 20, 22, 23, 104, 105, 107 (wtf...?)
-    # texcoord_mapping = get_shader_property(material, f'shaderassign>options>uking_texcoord{<0 to 7>}_mapping')
-
-    # NOTE: TotK equivalent is apparently `o_texture{tex_idx}_texcoord`.
-    # Index can be from 0 to 7.
-    # Values can be None, 1 to 8
-    uv_idx = get_shader_prop(material, f'shaderassign>options>uking_texture{tex_idx}_texcoord')
-    # This sounds like it should refer to what UVMap is used by a texture at the given index in the texturelist
-    # but the fact that it works very often is more of a coincidence of the fact that tex_idx of Albedos is usually 0
-    # and the default value of uking_texture0_texcoord is usually None. So, we might as well be returning `"_Alb" in img.name`,
-    # which is a bit disappointing.
-    return uv_idx == None
+    if '_Alb' in img.name:
+        if "damage" in lc_img_name:
+            return False
+        return True
+    if shader_name == 'BotW: Generic NPC' and "_ao" in lc_img_name:
+        return True
+    if "clrmak" in lc_img_name or "clrmsk" in lc_img_name:
+        return True
+    if get_shader_prop(material, 'shaderassign>options>uking_texture3_texcoord') == 2:
+        # Catches a couple of armor pieces that use 2nd uvmap for emission.
+        return False
+    if "_Nrm" in img.name:
+        return False
+    if "_Spm" in img.name:
+        return False
+    return True
 
 ### SHADER DATA READING ###
 
@@ -611,14 +612,14 @@ def ensure_nodetree(nodetree_name) -> bpy.types.NodeTree:
     """Append or link the nodetree, depending on add-on preferences."""
     return ensure_lib_datablock('node_groups', nodetree_name)
 
-def create_helper_nodes(collection, object, material, img_node, pixel_image, socket_name, shader_node):
+def create_helper_nodes(collection, material, img_node, pixel_image, socket_name, shader_node):
     shader_name = shader_node.node_tree.name
     nodes = material.node_tree.nodes
     links = material.node_tree.links
 
     lc_assetname = (collection.get('asset_name') or "").lower()
 
-    ensure_UV_node(object, material, img_node, socket_name, shader_name)
+    ensure_UV_node(material, img_node, socket_name, shader_name)
 
     if shader_name == 'BotW: Eye' and socket_name in ('Albedo', 'Emission Color', 'Emission Mask', 'Normal Map') and len(img_node.inputs) > 0:
         eye_rig_node = nodes.get("Eye Rig")
@@ -677,7 +678,7 @@ def create_helper_nodes(collection, object, material, img_node, pixel_image, soc
     elif socket_name == 'Metallic':
         set_socket_value(shader_node, 'Roughness', METAL_ROUGHNESS)
 
-def ensure_UV_node(object, material, img_node, socket_name, shader_name):
+def ensure_UV_node(material, img_node, socket_name, shader_name):
     if img_node.type != 'TEX_IMAGE':
         return
 
@@ -706,17 +707,9 @@ def ensure_UV_node(object, material, img_node, socket_name, shader_name):
             # I think non-default WrapModes always use the first UV map, so imma just return here.
             return
 
-    lc_img_name = img_node.image.name.lower()
-    if len(object.data.uv_layers) > 1:
-        uses_first_uvmap = guess_tex_uses_first_uv(material, img_node.image, socket_name)
-        if "_alb" in lc_img_name and "damage" in lc_img_name:
-            uses_first_uvmap = False
-        if shader_name == 'BotW: Generic NPC' and "_ao" in lc_img_name:
-            uses_first_uvmap = True
-        if "clrmak" in lc_img_name or "clrmsk" in lc_img_name:
-            uses_first_uvmap = True
-
-        if not uses_first_uvmap:
+    if material['num_uv_layers'] > 1:
+        use_first_uv = guess_tex_uses_first_uv(material, shader_name, img_node.image, socket_name)
+        if not use_first_uv:
             fallback_node = nodes.get("Second UV Channel")
             if not fallback_node:
                 fallback_node = nodes.new(type="ShaderNodeGroup")
@@ -881,7 +874,7 @@ def hookup_texture_nodes(collection, object, material, shader_node, socket_map) 
         if socket_name == 'SPM' and pixel_image.has_green and not pixel_image.all_channels_match:
             spm_has_green = True
 
-        create_helper_nodes(collection, object, material, img_node, pixel_image, socket_name, shader_node)
+        create_helper_nodes(collection, material, img_node, pixel_image, socket_name, shader_node)
 
         # Hook up texture to target socket on the shader node group.
         shader_socket = shader_node.inputs.get(socket_name)

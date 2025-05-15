@@ -26,6 +26,11 @@ class BotWImportPreferences(AddonPreferences):
         subtype='FILE_PATH',
         description="Folder to place .blend files of individual imported assets."
     )
+    terrain_folder: StringProperty(
+        name="Terrain Folder",
+        subtype='FILE_PATH',
+        description="Folder where the terrain was unpacked using Unpack Terrain operator."
+    )
 
     resource_append_mode: EnumProperty(
         name="Resource Load Mode",

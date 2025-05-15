@@ -3,6 +3,8 @@ module_names = [
     "build_asset",
     "load_map_section",
     "unpack_map_sstera",
+    "terrain_shared",
+    "terrain",
 ]
 
 modules = [

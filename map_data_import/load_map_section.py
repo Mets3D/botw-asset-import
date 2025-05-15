@@ -1,5 +1,5 @@
 import bpy, os
-from bpy.props import StringProperty, EnumProperty, BoolProperty
+from bpy.props import EnumProperty, BoolProperty
 from mathutils import Matrix, Euler
 from math import radians
 from collections import defaultdict

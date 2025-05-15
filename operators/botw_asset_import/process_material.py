@@ -401,7 +401,7 @@ def is_water(material) -> bool:
 
     if any_in_any(['Water'], textures):
         return True
-    
+
     return False
 
 def is_malice(material) -> bool:
@@ -1093,7 +1093,6 @@ def load_assigned_json_textures(material) -> list[bpy.types.Image]:
     return textures
 
 def load_blend_textures(material, socket_map) -> OrderedDict[bpy.types.Image, str]:
-    """Based on https://github.com/augmero/bmubin/blob/main/scripts/asset/shader_fixer.py"""
     alb_blend_idx = 1
     nrm_blend_idx = 1
     new_socket_map = OrderedDict()

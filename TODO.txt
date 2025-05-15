@@ -1,6 +1,7 @@
 - 'shaderassign>options>uking_material_behave' : 102 is always glass but I'm not sure if it is all glass. Either way, we could add some treatment for it.
 
 - The add-on probably doesn't work with mods right now, since we assume we can find every material in the add-on's own database, which is probably not true for mods!
+- It also can't import arbitrary mubins, since the map asset database just ships with the addon.
 
 Importer feature ideas:
     - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece. Could be fun to store and add related functionality to the BlankFile.blend scripts.

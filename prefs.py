@@ -7,17 +7,17 @@ class BotWImportPreferences(AddonPreferences):
     bl_idname = __package__
 
     game_models_folder: StringProperty(
-        name="Textures Folder",
+        name="Extracted Models",
         subtype='FILE_PATH',
         description="If the path to Link's head texture on your system is this:\nD:\\BotW Extracted\\Models\\Link\\Link_Head_Alb.png\nThen in this box you should browse this:\nD:\\BotW Extracted\\Models\\"
     )
     game_icons_folder: StringProperty(
-        name="Icons Folder",
+        name="Extracted Icons",
         subtype='FILE_PATH',
         description="If the path to the Ancient Arrow's inventory icon is this:\nD:\\BotW Extracted\\Icons\\AncientArrow\\AncientArrow.jpg\nThen in this box you should browse this:\nD:\\BotW Extracted\\Icons\\"
     )
     game_anims_folder: StringProperty(
-        name="Animations Folder",
+        name="Extracted Animations",
         subtype='FILE_PATH',
         description="If the path to the Bear's Eat animation is this:\nD:\\BotW Extracted\\Animations\\Animal_Bear_Animation\\Eat.seanim\nThen in this box you should browse this:\nD:\\BotW Extracted\\Animations\\"
     )
@@ -30,10 +30,10 @@ class BotWImportPreferences(AddonPreferences):
     resource_append_mode: EnumProperty(
         name="Resource Load Mode",
         items=[
-            ('APPEND', "Append", "Make a local copy of bone widgets and shader nodegroups"),
-            ('LINK', "Link", "Link bone widgets and shader nodegroups from the add-on's resources.blend file"),
+            ('APPEND', "Append", "Make a local copy"),
+            ('LINK', "Link", "Link from the add-on's resources.blend file"),
         ],
-        description="Note: World and Lights will always be appended, as linking them would be kinda pointless"
+        description="How to load bone widgets and shader nodegroups.\nNote: World and Lights will always be appended, as linking them would be kinda pointless"
     )
 
     def draw(self, context):

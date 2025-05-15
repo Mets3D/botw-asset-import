@@ -1,7 +1,6 @@
 import bpy, os, glob, sys, time, subprocess, shutil, json, io, zipfile
 from bpy.props import BoolProperty, StringProperty, IntProperty, EnumProperty
 import pickle
-from pathlib import Path
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import shared_memory
@@ -81,9 +80,9 @@ def map_section_enum_items():
     return enum_items
 
 class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
-    """Build asset cache one .blend per asset for importing bmubin's map data"""
+    """Build asset library consisting of a .blend file per each game asset"""
     bl_idname = "object.botw_build_assetlib_for_map"
-    bl_label = "BotW: Build asset library for map import"
+    bl_label = "BotW: Build Asset Library"
     bl_options = {'REGISTER', 'UNDO'}
 
     def count_dae(self, context):

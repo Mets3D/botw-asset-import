@@ -4,24 +4,18 @@
 Importer feature ideas:
     - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece. Could be fun to store and add related functionality to the BlankFile.blend scripts.
 
+- The fences around Woodland Stables are missing, I wonder what else...?
 Terrain TODO
-    - I started trying to refactor bmubin
-        - We always loop over the whole grid, but skip certain blocks depending on what's returned by lod_ignore(), which is dumb.
-    - I made a very quick and dirty test of the material, but it will have to be generated procedurally in order to keep memory usage to a minimum (only load necessary textures for a given chunk)
-        - Mix together all used material0 albedos (with most common to least common, generate nodes top to bottom, left to right.)
-        - Repeat for material0 normals
-        - Repeat for material1 albedos
-        - Repeat for material1 normals
-        - Geometry Position is plugged into every texture node. Can insert a mapping node inbetween as well for UV scale control.
-        - At the end, blend the resulting combined material0 and material1 into the final blended albedo/normal
-        - Hook up to some linked nodegroup so that if multiple chunks are present, their shading can be edited together.
-        - Check if normal map Z channel is working as intended, it's yellow to start, sus.
+    - I removed the call to Recalculate Normals, but it seems needed.
+    - There are holes in the fucking map, and I really dread the code that fills them up.
+    - Materials have too many textures for Eevee. Need option to not use normal maps.
 
 Extraction tutorial:
     - Add images or videos of the resulting imported shaders and animations
     - Same for the ReadMe of the Git repo.
 
 Asset pack release:
+    - KEEP IN MIND I DON'T HAVE FBX'ES FROM NOESIS RN SO ALL MY ARMATURES ARE ASS.
     - Need to re-do Obj_Objects because a bunch of objects have no textures assigned for some reason.
     - Need to re-do Obj_Fauna to fix transparency and add wind.
     - Kinda need to re-do everything because the shaders are completely different now... Yikes.

@@ -4,6 +4,8 @@ from pathlib import Path
 
 from ..prefs import get_addon_prefs
 from .build_asset_library import map_section_enum_items
+from ..operators.botw_asset_import.process_material import init_nodetree, ensure_loaded_img
+from ..operators.botw_asset_import.constants import TERRAIN_TEX_MAPPING
 from .terrain_shared import (
     terrain_is_within_map_section, 
     moser_de_brujin, 
@@ -22,6 +24,8 @@ class TerrainBuilder:
         self.terrain_dir = terrain_dir
 
         self.bm: bmesh.types.BMesh = bmesh.new()
+        self.mat0_mats: set[int] = set()
+        self.mat1_mats: set[int] = set()
         self.mat0 = self.bm.verts.layers.int.new("material0")
         self.mat1 = self.bm.verts.layers.int.new("material1")
         self.mat_blend = self.bm.verts.layers.float.new("material_blend")
@@ -176,6 +180,8 @@ class TerrainBuilder:
             # We don't need a UVMap, since it's easiest to just use the vert positions as texture coords. (done in the material)
             bvert[self.mat0] = mat0
             bvert[self.mat1] = mat1
+            self.mat0_mats.add(mat0)
+            self.mat1_mats.add(mat1)
             bvert[self.mat_blend] = mat_blend/255
 
         rows.append(row)
@@ -318,26 +324,82 @@ def vert_dist(lod_level):
     grid_unit_size = chunk_world_size/256
     return grid_unit_size
 
-def build_map(terrain_dir, map_section, lod_level) -> bmesh.types.BMesh:
-    bpy.ops.object.select_all(action='SELECT')
-    bpy.ops.object.delete()
+def create_material(terrainbuilder, object):
+    material = bpy.data.materials.new(object.name)
+    object.data.materials.append(material)
 
-    for area in bpy.data.screens["Layout"].areas:
-        if area.type == 'VIEW_3D':
-            for space in area.spaces:
-                if space.type == 'VIEW_3D':
-                    space.shading.color_type = 'TEXTURE'
-                    space.clip_end = 100000
-        if area.type == 'OUTLINER':
-            space = area.spaces[0]
-            space.show_restrict_column_viewport = True
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
 
-    builder = TerrainBuilder(terrain_dir, map_section)
-    builder.build(lod_level)
+    shader_node = init_nodetree(material, "BotW: Terrain")
+    out_node = nodes['BotW Output']
+    out_node.target = 'CYCLES'
+    out_eevee_node = nodes.new('ShaderNodeOutputMaterial')
+    out_eevee_node.target = 'EEVEE'
+    links.new(shader_node.outputs['Eevee'], out_eevee_node.inputs[0])
 
-    print('\n\n')
+    spacing = 400
 
-    return builder.bm
+    def make_img_node(img_name, y_coord):
+        node = nodes.new('ShaderNodeTexImage')
+        node.image = ensure_loaded_img(img_name)
+        if "Cmb" in img_name:
+            node.image.colorspace_settings.name = 'Non-Color'
+        node.width = 300
+        node.location = (0, y_coord)
+        position_node = nodes.get("Position")
+        if not position_node:
+            uv_node = nodes.new('ShaderNodeNewGeometry')
+            position_node = nodes.new('ShaderNodeMapping')
+            position_node.inputs['Scale'].default_value = (0.1, 0.1, 1)
+            links.new(uv_node.outputs['Position'], position_node.inputs[0])
+            position_node.name = "Position"
+            uv_node.location = (-spacing*2, 0)
+            position_node.location = (-spacing, 0)
+        links.new(position_node.outputs[0], node.inputs[0])
+        return node
+
+    mat0_mats = sorted(terrainbuilder.mat0_mats)
+    mat1_mats = sorted(terrainbuilder.mat1_mats)
+    y_offset = 0
+    for k, mat_list in enumerate((mat0_mats, mat1_mats)):
+        attr_node = nodes.new('ShaderNodeAttribute')
+        attr_node.attribute_name = f'material{k}'
+        attr_node.location = (-spacing, y_offset+spacing)
+        for mat_type in ("Alb", "Cmb"):
+            img_node = None
+            node_chain = []
+            for i, mat_id in enumerate(mat_list):
+                tex_id = TERRAIN_TEX_MAPPING[mat_id]
+                img_node = make_img_node(f"Material{mat_type}_Slice_{tex_id}_", y_offset+i*spacing)
+                if i > 0:
+                    compare_node = nodes.new('ShaderNodeMath')
+                    compare_node.operation = 'COMPARE'
+                    compare_node.location = (img_node.location.x + i*spacing, img_node.location.y)
+                    compare_node.inputs[1].default_value = mat_id
+                    compare_node.inputs[2].default_value = 0.01
+                    links.new(attr_node.outputs[2], compare_node.inputs[0])
+                    mix_node = nodes.new('ShaderNodeMix')
+                    mix_node.data_type = 'RGBA'
+                    mix_node.location = (compare_node.location.x + spacing/2, compare_node.location.y)
+                    links.new(compare_node.outputs[0], mix_node.inputs[0])
+                    prev_node = node_chain[-1]
+                    if prev_node.type == 'TEX_IMAGE':
+                        output = prev_node.outputs[0]
+                    else:
+                        output = prev_node.outputs['Result']
+                    links.new(output, mix_node.inputs['A'])
+                    links.new(img_node.outputs[0], mix_node.inputs['B'])
+                    node_chain.append(mix_node)
+                else:
+                    node_chain.append(img_node)
+            y_offset = img_node.location[1] + spacing
+            links.new(node_chain[-1].outputs['Result'], shader_node.inputs[f"Mat{k} {mat_type}"])
+
+        shader_node.location = (node_chain[-1].location.x + 2*spacing, node_chain[-1].location.y/2)
+        out_node.location = (shader_node.location.x + spacing, shader_node.location.y)
+        out_eevee_node.location = (out_node.location.x, out_node.location.y-spacing)
 
 class SCENE_OT_botw_import_terrain(bpy.types.Operator):
     """Import BotW terrain chunk"""
@@ -348,15 +410,13 @@ class SCENE_OT_botw_import_terrain(bpy.types.Operator):
     lod_level: bpy.props.IntProperty(
         name="Max LOD Level", 
         max=8, min=0, soft_min=4, default=6, 
-        description="""
-        The game world is 16000x16000 meters.\n
-        The LOD level corresponds to a vertex density of 16000/2^LOD/256\n
-        LOD level 0 means 1 vertex per 62.5 meters.\n
-        LOD level 8 means 1 vertex per 0.24 meters.\n
-        Not all chunks of terrain have all LODs present in the game files, so this operator merges LODs up to the max that you select here.\n
-        Higher LOD results in massive file size and import time.\n
-        LOD level 6 is recommended, 7 if you want to go crazy. 8 is truly overkill.
-        """
+        description="""The game world is 16000x16000 meters.
+        The LOD level corresponds to a vertex density of 16000/2^LOD/256
+        LOD level 0 means 1 vertex per 62.5 meters.
+        LOD level 8 means 1 vertex per 0.24 meters.
+        Not all chunks of terrain have all LODs present in the game files, so this operator merges LODs up to the max that you select here.
+        Higher LOD results in massive file size and import time.
+        LOD level 6 is recommended, 7 if you want to go crazy. 8 is truly overkill."""
     )
 
     map_section: bpy.props.EnumProperty(
@@ -397,10 +457,23 @@ class SCENE_OT_botw_import_terrain(bpy.types.Operator):
         if not self.check_dirs():
             self.report({'ERROR'}, "Extracted terrain folders not found.")
             return {'CANCELLED'}
+
+        for area in bpy.data.screens["Layout"].areas:
+            if area.type == 'VIEW_3D':
+                for space in area.spaces:
+                    if space.type == 'VIEW_3D':
+                        space.clip_end = 100000
+            if area.type == 'OUTLINER':
+                space = area.spaces[0]
+                space.show_restrict_column_viewport = True
+
         terrain_dir = get_addon_prefs(context).terrain_folder
-        bmesh = build_map(terrain_dir, self.map_section, self.lod_level)
+        builder = TerrainBuilder(terrain_dir, self.map_section)
+        builder.build(self.lod_level)
+        bmesh = builder.bm
         map_name = f'terrain_map {self.map_section}'
         map_object = add_map_to_scene(map_name, bmesh)
+        create_material(builder, map_object)
 
         context.preferences.view.filebrowser_display_type = self.org_pref
         return {'FINISHED'}

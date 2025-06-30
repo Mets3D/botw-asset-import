@@ -1,5 +1,5 @@
 import bpy, os
-from .asset_focus import focus_action, focus_collections
+from .asset_focus import focus_action, focus_collections, focus_view_on_objects
 from bpy.props import BoolProperty
 from ..utils.pixel_image import PixelImage
 from ..utils.progressbar import ProgressBar
@@ -107,7 +107,10 @@ class ASSET_OT_batch_thumbnail_from_viewport(bpy.types.Operator):
         elif type(id) == bpy.types.Collection:
             if self.focus_each:
                 with Timer("Focus collections"):
-                    focus_collections(context, [id], self.focus_each, self)
+                    focus_collections(context, [id], focus_view=self.focus_each, operator=self)
+        elif type(id) == bpy.types.Object:
+            if self.focus_each:
+                focus_view_on_objects(context, [id])
 
         with Timer("Thumnail render"):
             asset_thumbnail_from_viewport(context, id)
@@ -155,10 +158,20 @@ def crop_asset_preview(id) -> bool:
 
 def asset_thumbnail_from_viewport(context, id, operator=None, change_output_settings=False):
     overlays_bkp = True
+
+    show_overlays = False
+    if type(id) == bpy.types.Object:
+        if id.type=='MESH' and len(id.data.polygons)==0:
+            # Mesh with no faces: enable overlays
+            show_overlays = True
+        elif id.type not in ('MESH', 'CURVE', 'CURVES', 'GREASEPENCIL', 'POINTCLOUD', 'META'):
+            # Non-visible object type: enable overlays
+            show_overlays = True
+
     for area in context.screen.areas:
         if area.type == 'VIEW_3D':
             overlays_bkp = area.spaces.active.overlay.show_overlays
-            area.spaces.active.overlay.show_overlays = False
+            area.spaces.active.overlay.show_overlays = show_overlays
             break
     with Timer("OpenGL Render"):
 

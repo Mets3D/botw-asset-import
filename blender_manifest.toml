@@ -3,10 +3,10 @@ schema_version = "1.0.0"
 id = "botw_importer"
 version = "0.0.1"
 name = "BotW Asset Importer"
-tagline = "Import assets and world of BotW"
-maintainer = "Community"
+tagline = "Import assets & terrain of BotW"
+maintainer = "Demeter Dzadik <metemer001@gmail.com>"
 type = "add-on"
-website = "blender.org"
+website = "https://github.com/Mets3D/botw-asset-import"
 tags = ["Import-Export"]
 
 blender_version_min = "4.4.0"

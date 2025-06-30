@@ -136,9 +136,11 @@ def focus_collections(context, collections, focus_view=True, operator=None):
 def focus_view_on_objects(context, objects=[]):
     if not objects:
         objects = context.selected_objects
-    fit_view3d_to_coords(context, *get_bbox_3d(objects))
-    # This worked fine until Blender 4.4, but now it needs to be ran twice...!
-    fit_view3d_to_coords(context, *get_bbox_3d(objects))
+    bbox_3d = get_bbox_3d(objects)
+    fit_view3d_to_coords(context, *bbox_3d)
+    if bpy.app.version >= (4, 4, 0):
+        # This worked fine until 4.4, but now it needs to be ran twice...!
+        fit_view3d_to_coords(context, *bbox_3d)
 
 def fit_view3d_to_coords(context, center, coords):
     area = next(a for a in context.screen.areas if a.type == 'VIEW_3D')

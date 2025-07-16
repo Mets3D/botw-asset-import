@@ -1,4 +1,4 @@
-import bpy, os, sys, subprocess, glob
+import bpy, os, sys, subprocess
 
 from pathlib import Path
 from tqdm import tqdm
@@ -26,6 +26,12 @@ class FILE_OT_unpack_terrain(bpy.types.Operator):
         # Workaround: Having file selectors inside pop-ups doesn't work with this user preference.
         self.org_pref = context.preferences.view.filebrowser_display_type
         context.preferences.view.filebrowser_display_type = 'WINDOW'
+        try:
+            ensure_oead()
+        except Exception as exc:
+            self.report({'ERROR'}, f"{exc}\nFailed to install oead (library that extracts .sstera files).\nYou likely don't have write permission to Blender's Python installation.\nYou must run as administrator or use portable Blender.")
+            return {'CANCELLED'}
+
         return context.window_manager.invoke_props_dialog(self, width=500)
 
     def draw(self, context):
@@ -75,10 +81,7 @@ def unpack_sstera(filepath: str, output_dir=""):
     try:
         from oead import Sarc, yaz0
     except:
-        ret = install_oead()
-        if ret == False:
-            return ret
-        from oead import Sarc, yaz0
+        ensure_oead()
 
     data = Path(filepath).read_bytes()
 
@@ -104,15 +107,17 @@ def unpack_sstera(filepath: str, output_dir=""):
 
     return
 
-def install_oead():
+def ensure_oead():
+    """I tried bundling the .whl files with the extension, tqdm works fine, oead does not."""
+
     # Blender's Python executable
     python_exe = sys.executable
 
-    print("Ensuring pip...")
     # Ensure pip is installed
     try:
         import pip
-    except ImportError:
+    except ModuleNotFoundError:
+        print("Installing pip...")
         subprocess.check_call([python_exe, "-m", "ensurepip"])
         subprocess.check_call([python_exe, "-m", "pip", "install", "--upgrade", "pip"])
 
@@ -124,9 +129,9 @@ def install_oead():
     try:
         import oead
         print(f"oead installed successfully!")
-    except ImportError:
-        print("Failed to install oead.")
-        return False
+    except ModuleNotFoundError as exc:
+        print(f"Failed to install oead: {exc}")
+        raise exc
 
     return True
 

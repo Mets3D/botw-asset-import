@@ -5,7 +5,7 @@ class BOTW_MT_import(bpy.types.Menu):
     bl_label = "BotW Import"
 
     def draw(self, context):
-        self.layout.operator("import_scene.botw_dae_fbx", text="Import Asset (.dae & .fbx)")
+        self.layout.operator("import_scene.botw_dae_fbx", text="Import Assets (.dae & .fbx)")
         self.layout.separator()
         self.layout.operator("object.botw_build_assetlib_for_map", text="Build Asset Library")
         self.layout.operator("object.botw_import_map_section", text="Import Map Section")

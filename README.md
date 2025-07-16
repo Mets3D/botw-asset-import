@@ -20,7 +20,7 @@ Once you've done everything described above, you can import models by following 
 - Make sure Blender's .dae and .fbx importer add-ons are enabled, since this add-on needs them.
 - Go to "Window->Toggle System Console", so you can see that it's doing something. Avoid selecting text in this window, as that causes it to pause processing. You can press any key to resume.
 - Copy the assets you want to import into another folder. This is necessary because Blender's importer interface can't select a sub-set of folders within a folder.
-- Go to File->Import->BotW Import->Import Asset (.dae & .fbx) -> browse the folder you just made -> hit "Import".
+- Go to File->Import->BotW Import->Import Assets (.dae & .fbx) -> browse the folder you just made -> hit "Import".
 
 Things to note:
 - Reskins are not handled; Since there's only 1 Bokoblin mesh, only 1 Bokoblin will be imported. To create the reskinned versions, you'll have to duplicate things and hook up the textures yourself.

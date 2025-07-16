@@ -7,7 +7,7 @@ from multiprocessing import shared_memory
 from tqdm import tqdm
 
 from ..operators.botw_asset_import.constants import ensure_caches
-from ..prefs import get_addon_prefs
+from ..prefs import get_addon_prefs, draw_folder_select
 
 THIS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 ADDON_DIR = os.sep.join(THIS_FOLDER.split(os.sep)[:-1])
@@ -171,7 +171,12 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         layout.prop(self, 'quiet')
         layout.separator()
 
-        layout.prop(self, 'target_dir')
+        draw_folder_select(layout, self, 'target_dir', empty_ok=False)
+        if not os.path.isdir(self.target_dir):
+            row = layout.row()
+            row.alert = True
+            row.label(text="Specified folder does not exist.")
+            return
         layout.prop(self, 'overwrite')
         layout.separator()
 
@@ -180,10 +185,12 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         layout.label(text=f"{self.dae_count} asset .blend files will be generated.")
 
     def execute(self, context):
-        assert os.path.exists(self.target_dir) and not os.path.isfile(self.target_dir), "Output folder not found: "+self.target_dir
+        if not os.path.exists(self.target_dir) or os.path.isfile(self.target_dir):
+            self.report({'ERROR'}, f"Specified folder does not exist: {self.target_dir}")
+            return {'CANCELLED'}
         dae_to_blend_map = json.loads(self.dae_map)
         build_asset_library(dae_to_blend_map, self.quiet, self.blender_instances)
-        
+
         context.preferences.view.filebrowser_display_type = self.org_pref
         return {'FINISHED'}
 

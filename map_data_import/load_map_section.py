@@ -10,7 +10,7 @@ from ..operators.botw_asset_import.prepare_scene import ensure_botw_scene_settin
 from ..utils.customprop import copy_property
 from ..utils.collections import ensure_collection
 from ..utils.resources import ensure_lib_datablock
-from ..prefs import get_addon_prefs
+from ..prefs import get_addon_prefs, draw_folder_select
 
 class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
     """Import one chunk of the overworld"""
@@ -39,10 +39,14 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
         layout = self.layout
         layout.use_property_split=True
         layout.use_property_decorate=False
-        layout.prop(get_addon_prefs(context), 'assets_output_folder')
+        draw_folder_select(layout, get_addon_prefs(context), 'assets_output_folder', empty_ok=False)
         layout.prop(self, 'map_section')
 
     def execute(self, context):
+        prefs = get_addon_prefs(context)
+        if not os.path.isdir(prefs.assets_output_folder):
+            self.report({'ERROR'}, f"Asset output folder does not exist: {prefs.asset_output_folder}")
+            return {'CANCELLED'}
         map_data = load_instance_database()[self.map_section+"_instance_cache.json"]
 
         ensure_botw_scene_settings(context)
@@ -56,7 +60,6 @@ class OBJECT_OT_botw_import_map_section(bpy.types.Operator):
         total = len(dynamic_assets) + len(static_assets)
         bar_format = "{n_fmt}/{total_fmt} {bar}"
 
-        prefs = get_addon_prefs(context)
 
         with tqdm(total=total, bar_format=bar_format) as pbar:
             for is_dynamic, assets in zip((True, False), (dynamic_assets, static_assets)):

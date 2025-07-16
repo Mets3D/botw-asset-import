@@ -78,10 +78,8 @@ class FILE_OT_unpack_terrain(bpy.types.Operator):
         return {'FINISHED'}
 
 def unpack_sstera(filepath: str, output_dir=""):
-    try:
-        from oead import Sarc, yaz0
-    except:
-        ensure_oead()
+    ensure_oead()
+    from oead import Sarc, yaz0
 
     data = Path(filepath).read_bytes()
 
@@ -110,28 +108,34 @@ def unpack_sstera(filepath: str, output_dir=""):
 def ensure_oead():
     """I tried bundling the .whl files with the extension, tqdm works fine, oead does not."""
 
-    # Blender's Python executable
-    python_exe = sys.executable
-
-    # Ensure pip is installed
-    try:
-        import pip
-    except ModuleNotFoundError:
-        print("Installing pip...")
-        subprocess.check_call([python_exe, "-m", "ensurepip"])
-        subprocess.check_call([python_exe, "-m", "pip", "install", "--upgrade", "pip"])
-
-    print("Install oead module...")
-    # Install oead
-    subprocess.check_call([python_exe, "-m", "pip", "install", "oead"])
-
-    # Optional: confirm installation
     try:
         import oead
-        print(f"oead installed successfully!")
+        # If that didn't raise an exception, we don't need to do anything.
+        return
     except ModuleNotFoundError as exc:
-        print(f"Failed to install oead: {exc}")
-        raise exc
+        # Blender's Python executable
+        python_exe = sys.executable
+
+        # Ensure pip is installed
+        try:
+            import pip
+        except ModuleNotFoundError:
+            print("Installing pip...")
+            subprocess.check_call([python_exe, "-m", "ensurepip"])
+            subprocess.check_call([python_exe, "-m", "pip", "install", "--upgrade", "pip"])
+
+        print("Ensure oead is not in global python, otherwise we can't install to local python (yeah, really)")
+        subprocess.check_call([python_exe, "-m", "pip", "uninstall", "-y", "oead"])
+
+        print("Install oead module...")
+        subprocess.check_call([python_exe, "-m", "pip", "install", "oead"])
+
+        try:
+            import oead
+            print(f"oead installed successfully!")
+        except ModuleNotFoundError as exc:
+            print(f"Failed to install oead: {exc}")
+            raise exc
 
     return True
 

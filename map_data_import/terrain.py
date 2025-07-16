@@ -434,7 +434,7 @@ class SCENE_OT_botw_import_terrain(bpy.types.Operator):
     def check_dirs(self):
         prefs = get_addon_prefs()
         path = Path(prefs.terrain_folder)
-        return all( [(path / Path(dir)).is_dir() for dir in ('water', 'mate', 'terrain', 'grass')] )
+        return all( [(path / Path(dir)).is_dir() for dir in ('mate', 'terrain')] )
 
     def draw(self, context):
         layout = self.layout
@@ -447,7 +447,7 @@ class SCENE_OT_botw_import_terrain(bpy.types.Operator):
         if not self.check_dirs():
             col = layout.column()
             col.alert = True
-            col.row().label(text="Extracted terrain folders not found (terrain/mate/water/grass)", icon='ERROR')
+            col.row().label(text="Extracted terrain folders not found (terrain/mate)", icon='ERROR')
             col.row().label(text="Use 'Unpack Terrain' operator first.", icon='ERROR')
             return
         layout.prop(self, 'lod_level')

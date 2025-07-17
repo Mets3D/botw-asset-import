@@ -252,7 +252,6 @@ def import_fbx(context, filepath, discard_types=('MESH', 'EMPTY'), apply_transfo
             filepath=filepath, 
             discard_types=discard_types, 
             apply_transforms=apply_transforms,
-            global_scale=100,
         )
 
 def import_dae(context, filepath, discard_types=('EMPTY'), apply_transforms=True):

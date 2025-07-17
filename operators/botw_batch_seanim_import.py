@@ -218,6 +218,7 @@ def fix_root_motion_with_baking(context, rig, actions):
     rig.select_set(True)
     context.view_layer.objects.active = rig
     rig.animation_data_create()
+    action_bkp = rig.animation_data.action
     rig.animation_data.action = None
     for pb in rig.pose.bones:
         pb.matrix_basis.identity()
@@ -270,7 +271,7 @@ def fix_root_motion_with_baking(context, rig, actions):
     bpy.ops.object.mode_set(mode='POSE')
 
     for action in actions:
-        if action.name.startswith("Face") or action.name.split(": ")[1].startswith("Face"):
+        if action.name.startswith("Face") or (": " in action.name and action.name.split(": ")[1].startswith("Face")):
             bad_curves = [fc for fc in action.fcurves if "Root" in fc.data_path]
             print("Removing root keyframes from face anim: ", action.name)
             for fc in bad_curves:
@@ -295,6 +296,8 @@ def fix_root_motion_with_baking(context, rig, actions):
     rig.animation_data.action = None
     for pb in rig.pose.bones:
         pb.matrix_basis.identity()
+
+    rig.animation_data.action = action_bkp
 
     bpy.data.objects.remove(rig_clone)
     bpy.data.objects.remove(empty)

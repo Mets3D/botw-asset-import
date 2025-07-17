@@ -237,13 +237,23 @@ def import_and_merge_fbx_armature(context, *, dae_objs, dae_path, rig_name="", a
     return ret_objs
 
 def import_fbx(context, filepath, discard_types=('MESH', 'EMPTY'), apply_transforms=True):
-    return import_whatever(
-        context, 
-        import_func=bpy.ops.import_scene.fbx,
-        filepath=filepath, 
-        discard_types=discard_types, 
-        apply_transforms=apply_transforms
-    )
+    if bpy.app.version <= (4, 4, 0):
+        return import_whatever(
+            context, 
+            import_func=bpy.ops.import_scene.fbx,
+            filepath=filepath, 
+            discard_types=discard_types, 
+            apply_transforms=apply_transforms
+        )
+    else:
+        return import_whatever(
+            context, 
+            import_func=bpy.ops.wm.fbx_import,
+            filepath=filepath, 
+            discard_types=discard_types, 
+            apply_transforms=apply_transforms,
+            global_scale=100,
+        )
 
 def import_dae(context, filepath, discard_types=('EMPTY'), apply_transforms=True):
     fix_dae_uvmaps_in_place(filepath)
@@ -255,7 +265,7 @@ def import_dae(context, filepath, discard_types=('EMPTY'), apply_transforms=True
         apply_transforms=apply_transforms
     )
 
-def import_whatever(context, *, import_func, filepath: str, discard_types=('EMPTY'), apply_transforms=True):
+def import_whatever(context, *, import_func, filepath: str, discard_types=('EMPTY'), apply_transforms=True, **kwargs):
     """import_func can be any function that takes a "filepath" property.
     (Okay, it should also load the contents to the active collection and select all objects.)
     Basically any Blender import function. But this function is here just to share code between .dae/.fbx import.
@@ -269,7 +279,7 @@ def import_whatever(context, *, import_func, filepath: str, discard_types=('EMPT
 
     # I've tried a million ways to suppress the .dae importer prints but it can't be done without a PR to Blender.
     # (Or by Popen()ing another blender instance to import and then appending from that, which would be too silly.)
-    import_func(filepath=filepath)
+    import_func(filepath=filepath, **kwargs)
 
     # NOTE: The transform values of some objects are not their actual transforms. (probably some .dae importer bug)
     # They just need to be nudged so they snap to their actual transform values (which do seem to import correctly).

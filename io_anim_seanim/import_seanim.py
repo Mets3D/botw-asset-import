@@ -97,17 +97,17 @@ def load(context, files, filepath="", operator=None):
         # Print when all files have been imported
         progress.leave_substeps("Finished!")
 
-def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=True) -> bpy.types.Action:
+def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=True) -> bpy.types.Action | None:
     anim = SEAnim.Anim(filepath)
 
-    ob = context.active_object
-    if not ob.animation_data:
-        ob.animation_data_create()
+    rig = context.active_object
+    if not rig.animation_data:
+        rig.animation_data_create()
 
     # Force all bones to use quaternion rotation
     # (Must be included or bone.rotation_quaternion won't update
     #  properly when setting the matrix directly)
-    for bone in ob.pose.bones.data.bones:
+    for bone in rig.pose.bones.data.bones:
         bone.rotation_mode = 'QUATERNION'
 
     bpy.ops.object.mode_set(mode='POSE')
@@ -118,7 +118,7 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
     action['file_size_kb'] = round(os.path.getsize(filepath) / 1024, 2)
     action['filepath'] = filepath
     action['filename'] = actionName
-    ob.animation_data.action = action
+    rig.animation_data.action = action
 
     scene = context.scene
     scene.render.fps = int(anim.header.framerate)
@@ -133,13 +133,13 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
     for i, tag in enumerate(anim.bones):
         if tag.name == 'Root' and botw_fix:
             tag.rotate_anim(Euler((pi/2, 0, 0)))
-        if tag.name not in ob.pose.bones:
+        if tag.name not in rig.pose.bones:
             if tag.name == "Root":
                 # Special case, since the root bone can just be at the object origin, let's just create it.
                 bpy.ops.object.mode_set(mode='EDIT')
-                root = ob.data.edit_bones.new(name="Root")
+                root = rig.data.edit_bones.new(name="Root")
                 root.tail.y = 1
-                for eb in ob.data.edit_bones:
+                for eb in rig.data.edit_bones:
                     if not eb.parent and eb != root:
                         eb.parent = root
                 bpy.ops.object.mode_set(mode='POSE')
@@ -157,7 +157,7 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
     # Look up table that we use to get a given bone by name
     # without having to worry about casing
     bone_map = {}
-    for bone in ob.pose.bones:
+    for bone in rig.pose.bones:
         name = bone.name.lower()
         if name in bone_map:
             print("Warning: Bone name conflict for '%s'\n" % name)
@@ -172,7 +172,7 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
             if(len(tag.name) == 0 and
                anim.header.animType == SEAnim.SEANIM_TYPE.SEANIM_TYPE_DELTA):
                 root = first(DeltaRootBones,
-                             [bone.name.lower() for bone in ob.pose.bones])
+                             [bone.name.lower() for bone in rig.pose.bones])
                 if root is not None:
                     tag.name = root
             bone = bone_map[tag.name.lower()]
@@ -321,8 +321,13 @@ def load_seanim(context, progress=None, filepath="", operator=None, botw_fix=Tru
 
     # Notetracks
     for note in anim.notes:
-        notetrack = ob.animation_data.action.pose_markers.new(note.name)
+        notetrack = rig.animation_data.action.pose_markers.new(note.name)
         notetrack.frame = note.frame
+
+    if bpy.app.version >= (4, 5, 0):
+        action.slots[0].target_id_type = 'OBJECT'
+        action.slots[0].name_display = rig.name
+        rig.animation_data.action_slot = action.slots[0]
 
     context.evaluated_depsgraph_get().update()
     bpy.ops.object.mode_set(mode='POSE')

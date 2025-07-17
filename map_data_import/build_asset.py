@@ -9,7 +9,9 @@ def main():
     dae_path = argv[-2]
 
     # Since this is now running in a whole separate Blender and Python instance, we need to import things as if we were inside of Blender.
-    botw_import_addon = import_addon_module("botw_asset_import")
+    botw_import_addon = import_addon_module("botw_importer")
+    if not botw_import_addon:
+        botw_import_addon = import_addon_module("botw_asset_import")
 
     context = bpy.context
 

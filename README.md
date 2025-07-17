@@ -6,7 +6,8 @@ This is a Blender extension to import BotW assets in .dae & .fbx format (you kin
 I wrote a detailed guide on how to prepare the game files for use with this add-on, which you can find [here](https://open3dlab.com/tutorials/view/241/). As you follow that guide, Step 6 will lead you back to here. If you're already familiar with modding and Switch Toolbox, then you only need that guide if you want to import mod assets.
 
 ### Installation & file paths
-The add-on was written and mainly tested in Blender 4.4. Other versions (including 4.5) will have issues.
+The minimum Blender version for this add-on is 4.4.
+
 Install like any other add-on that isn't on the Extension Platform:
 - Download this repo as .zip
 - In Blender, go to Edit->Preferences->Addons

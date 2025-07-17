@@ -164,7 +164,12 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         prefs = get_addon_prefs(context)
         row = layout.row()
         row.enabled = False
-        row.prop(prefs, 'game_models_folder', text="Models Folder (Preferences)")
+        draw_folder_select(row, prefs, 'game_models_folder', empty_ok=False)
+        if not os.path.isdir(prefs.game_models_folder):
+            row = layout.row()
+            row.alert=True
+            row.label(text="Models folder does not exist. You must specify it in the add-on preferences.")
+            return
         layout.separator()
 
         layout.prop(self, 'blender_instances')
@@ -175,7 +180,7 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         if not os.path.isdir(self.target_dir):
             row = layout.row()
             row.alert = True
-            row.label(text="Specified folder does not exist.")
+            row.label(text="Output folder does not exist.")
             return
         layout.prop(self, 'overwrite')
         layout.separator()
@@ -185,9 +190,15 @@ class OBJECT_OT_botw_build_assetlib_for_map(bpy.types.Operator):
         layout.label(text=f"{self.dae_count} asset .blend files will be generated.")
 
     def execute(self, context):
-        if not os.path.exists(self.target_dir) or os.path.isfile(self.target_dir):
-            self.report({'ERROR'}, f"Specified folder does not exist: {self.target_dir}")
+        prefs = get_addon_prefs(context)
+        if not os.path.isdir(prefs.game_models_folder):
+            self.report({'ERROR'}, f"Models folder does not exist: {prefs.game_models_folder}")
             return {'CANCELLED'}
+
+        if not os.path.exists(self.target_dir) or os.path.isfile(self.target_dir):
+            self.report({'ERROR'}, f"Output folder does not exist: {self.target_dir}")
+            return {'CANCELLED'}
+
         dae_to_blend_map = json.loads(self.dae_map)
         build_asset_library(dae_to_blend_map, self.quiet, self.blender_instances)
 

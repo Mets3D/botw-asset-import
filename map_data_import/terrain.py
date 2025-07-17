@@ -395,7 +395,10 @@ def create_material(terrainbuilder, object):
                 else:
                     node_chain.append(img_node)
             y_offset = img_node.location[1] + spacing
-            links.new(node_chain[-1].outputs['Result'], shader_node.inputs[f"Mat{k} {mat_type}"])
+            result = node_chain[-1].outputs.get('Result')
+            if not result:
+                result = node_chain[-1].outputs['Color']
+            links.new(result, shader_node.inputs[f"Mat{k} {mat_type}"])
 
         shader_node.location = (node_chain[-1].location.x + 2*spacing, node_chain[-1].location.y/2)
         out_node.location = (shader_node.location.x + spacing, shader_node.location.y)

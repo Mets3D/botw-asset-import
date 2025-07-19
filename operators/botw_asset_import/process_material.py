@@ -1007,6 +1007,15 @@ def ensure_loaded_img(img_name, allow_missing=False) -> bpy.types.Image or None:
     img = bpy.data.images.get(img_name)
     if img:
         img.filepath = real_img_path
+        if len(img.pixels) == 0:
+            # This can happens sometimes when an image fails to load, pretty weird.
+            # The built-in reload() function also doesn't fix it, so we just have to nuke & reload ourselves.
+            img.filepath = "tmp"
+            img.name = "tmp"
+            new_img = ensure_loaded_img(img_name)
+            img.user_remap(new_img)
+            bpy.data.images.remove(img)
+            return new_img
     else:
         img = bpy.data.images.load(real_img_path, check_existing=True)
 

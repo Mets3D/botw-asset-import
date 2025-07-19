@@ -13,8 +13,7 @@ Install like any other add-on that isn't on the Extension Platform:
 - In Blender, go to Edit->Preferences->Addons
 - Little arrow on the top-right->Install From Disk...->Browse the .zip
 - Enable the add-on.
-
-- Follow the instruction on the tooltips (that appear on mouse hover) of the folder selectors.
+- Configure the file paths in the add-on preferences.
 
 ### Models
 Once you've done everything described above, you can import models by following these steps:
@@ -26,14 +25,6 @@ Once you've done everything described above, you can import models by following 
 Things to note:
 - Reskins are not handled; Since there's only 1 Bokoblin mesh, only 1 Bokoblin will be imported. To create the reskinned versions, you'll have to duplicate things and hook up the textures yourself.
 - I did my best to make materials look as close as possible to how they look in the game, but it can't be perfect.
-
-### Asset Operators
-Some of these operators are not strictly related to BotW and may be split out into a separate add-on in the future. They are for helping to create an actually usable asset library:
-- Merge Actions: Merge any actions selected in the Asset Browser/Outliner. Useful for Link's animations, where he sometimes has unique animations split up into separate head/body actions that belong together.
-- Merge Armatures: Merge selected armatures by removing duplicate bones and preserving parenting/modifier relationships. Useful for merging clothes onto characters.
-- Focus Asset: Supports Collection and Action assets. When a Collection asset is selected, this will isolate that collection, and frame the viewport to its objects. With an Action, it will only work when there is an active armature object, and it will assign the action, set the scene's frame range, and focus the camera on the rig's visible child objects. Handy in combination with the next operator, especially if you use Blender's "Lock Camera to View" option.
-- Thumbnail From Viewport: Makes a viewport snapshot and assigns it as the thumbnail of the active asset. Overlays will be disabled, but it's up to you to enter rendered view if you want to. Transparent pixels will be cropped, and the resolution is capped at 256 (by scaling it down if needed) which is Blender's hard limit for asset thumbnails.
-- Crop Asset Thumbnails: Crops transparent pixels out of the selected assets' thumbnails.
 
 ### Animations
 The add-on also includes a modified version of the [.seanim importer](https://github.com/SE2Dev/io_anim_seanim) by [SE2DEV](https://github.com/SE2Dev). The following modifications were made:
@@ -50,12 +41,20 @@ Things to note:
 - A few characters re-use animations of other characters, so the Auto-import operation won't work on them.
 - For the scale inheritance fix mentioned above, the armature itself needs to be modified, which is different from just importing animation data. The animations will only look right on armatures which had this fix applied to them.
 
-### Map Import
-The add-on has work-in-progress functionality to import maps (well, just the main map for now). You can find these operators under File->Import->BotW Import menu:
+### Environment & Terrain
+The add-on has work-in-progress functionality to import the map and terrain. This only supports the main map for now. You can find these operators under File->Import->BotW Import menu:
 - "Build Asset Library": Batch Import the game's assets into .blend files. This can take a while, and is necessary for the next operator:
 - "Import Map Section": Provided a folder full of .blend files containing game assets, this operator will instantiate those assets at their in-game positions. This only takes a second.
-- "Unpack Terrain .sstera": Browse a folder full of .sstera files (from your game files) and extract them to hght/water/grass/mate files. The importer for these doesn't exist yet.
-- "Import Terrain Section": Import the files unpacked from the .sstera files with the previous operator. Currently only imports terrain with materials. Due to the amount of textures, Eevee doesn't use normal maps.
+- "Unpack Terrain .sstera": Browse a folder full of .sstera files (from your game files) and extract them to hght/water/grass/mate files. The importer for water and grass does not exist yet.
+- "Import Terrain Section": Import the files unpacked from the .sstera files with the previous operator. Due to the amount of textures, Eevee doesn't use normal maps. You can also import only 1000x1000 meter chunks at a time, and their edges will have a gap when placed side by side. Not sure if this is something I will implement.
+
+### Asset Operators
+Some of these operators are not strictly related to BotW and may be split out into a separate add-on in the future. They are for helping to create an actually usable asset library:
+- Merge Actions: Merge any actions selected in the Asset Browser/Outliner. Useful for Link's animations, where he sometimes has unique animations split up into separate head/body actions that belong together.
+- Merge Armatures: Merge selected armatures by removing duplicate bones and preserving parenting/modifier relationships. Useful for merging clothes onto characters.
+- Focus Asset: Supports Collection and Action assets. When a Collection asset is selected, this will isolate that collection, and frame the viewport to its objects. With an Action, it will only work when there is an active armature object, and it will assign the action, set the scene's frame range, and focus the camera on the rig's visible child objects. Handy in combination with the next operator, especially if you use Blender's "Lock Camera to View" option.
+- Thumbnail From Viewport: Makes a viewport snapshot and assigns it as the thumbnail of the active asset. Overlays will be disabled, but it's up to you to enter rendered view if you want to. Transparent pixels will be cropped, and the resolution is capped at 256 (by scaling it down if needed) which is Blender's hard limit for asset thumbnails.
+- Crop Asset Thumbnails: Crops transparent pixels out of the selected assets' thumbnails.
 
 #### Notes:
 - The add-on just ships with a pre-built database of the main map, which was generated by bmubin (link below). Supporting arbitrary maps (dungeons, modded maps, etc) is something I'm not sure I will ever bother to do.

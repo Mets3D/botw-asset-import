@@ -17,8 +17,8 @@ license = [
 platforms = ["windows-x64", "linux-x64"]
 wheels = [
    "./wheels/tqdm-4.67.1-py3-none-any.whl",
-   "./wheels/oead-1.2.9.post4-pp310-pypy310_pp73-win_amd64.whl",
-   "./wheels/oead-1.2.9.post4-pp310-pypy310_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+   "./wheels/oead-1.2.9.post4-cp311-cp311-win_amd64.whl",
+   "./wheels/oead-1.2.9.post4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
 ]
 [permissions]
 files = "Load .dae/.fbx/.png/.jpg/.blend files from disk"

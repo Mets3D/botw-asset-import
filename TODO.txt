@@ -8,7 +8,6 @@ Importer feature ideas:
 Terrain TODO
     - I removed the call to Recalculate Normals, but it seems needed.
     - There are holes in the fucking map, and I really dread the code that fills them up.
-    - Materials have too many textures for Eevee. Need option to not use normal maps.
 
 Extraction tutorial:
     - Add images or videos of the resulting imported shaders and animations
@@ -30,10 +29,3 @@ Should update the Kena and Witcher 3 asset libraries as well, if they even need 
     For example, I don't think I marked Kena animations as assets, but might as well.
     Could also generate new thumbnails for them maybe, although I think these libraries used Cycles, so maybe not.
     Should definitely inlude BlankFile.blend (although maybe with a better name)
-
-Future projects:
-    Linkle
-    Zelda
-    Mipha
-    Girly animations?
-    Nude Link

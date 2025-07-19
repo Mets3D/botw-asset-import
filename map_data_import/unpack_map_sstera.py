@@ -1,6 +1,7 @@
-import bpy, os, sys, subprocess
+import bpy, os
 
 from pathlib import Path
+from oead import Sarc, yaz0
 from tqdm import tqdm
 
 from ..prefs import get_addon_prefs
@@ -26,12 +27,6 @@ class FILE_OT_unpack_terrain(bpy.types.Operator):
         # Workaround: Having file selectors inside pop-ups doesn't work with this user preference.
         self.org_pref = context.preferences.view.filebrowser_display_type
         context.preferences.view.filebrowser_display_type = 'WINDOW'
-        try:
-            ensure_oead()
-        except Exception as exc:
-            self.report({'ERROR'}, f"{exc}\nFailed to install oead (library that extracts .sstera files).\nYou likely don't have write permission to Blender's Python installation.\nYou must run as administrator or use portable Blender.")
-            return {'CANCELLED'}
-
         return context.window_manager.invoke_props_dialog(self, width=500)
 
     def draw(self, context):
@@ -78,9 +73,6 @@ class FILE_OT_unpack_terrain(bpy.types.Operator):
         return {'FINISHED'}
 
 def unpack_sstera(filepath: str, output_dir=""):
-    ensure_oead()
-    from oead import Sarc, yaz0
-
     data = Path(filepath).read_bytes()
 
     if data[:4] == b'Yaz0':
@@ -104,39 +96,5 @@ def unpack_sstera(filepath: str, output_dir=""):
             f.close()
 
     return
-
-def ensure_oead():
-    """I tried bundling the .whl files with the extension, tqdm works fine, oead does not."""
-
-    try:
-        import oead
-        # If that didn't raise an exception, we don't need to do anything.
-        return
-    except ModuleNotFoundError as exc:
-        # Blender's Python executable
-        python_exe = sys.executable
-
-        # Ensure pip is installed
-        try:
-            import pip
-        except ModuleNotFoundError:
-            print("Installing pip...")
-            subprocess.check_call([python_exe, "-m", "ensurepip"])
-            subprocess.check_call([python_exe, "-m", "pip", "install", "--upgrade", "pip"])
-
-        print("Ensure oead is not in global python, otherwise we can't install to local python (yeah, really)")
-        subprocess.check_call([python_exe, "-m", "pip", "uninstall", "-y", "oead"])
-
-        print("Install oead module...")
-        subprocess.check_call([python_exe, "-m", "pip", "install", "oead"])
-
-        try:
-            import oead
-            print(f"oead installed successfully!")
-        except ModuleNotFoundError as exc:
-            print(f"Failed to install oead: {exc}")
-            raise exc
-
-    return True
 
 registry = [FILE_OT_unpack_terrain]

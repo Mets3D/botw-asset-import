@@ -77,11 +77,17 @@ def draw_merge_actions(self, context):
         self.layout.operator(ASSET_OT_merge_actions.bl_idname)
 
 def register():
-    bpy.types.ASSETBROWSER_MT_asset.append(draw_merge_actions)
+    if bpy.app.version < (4, 5, 0):
+        bpy.types.ASSETBROWSER_MT_asset.append(draw_merge_actions)
+    else:
+        bpy.types.ASSETBROWSER_MT_metadata_preview_menu.append(draw_merge_actions)
 
 def unregister():
     try:
-        bpy.types.ASSETBROWSER_MT_asset.remove(draw_merge_actions)
+        if bpy.app.version < (4, 5, 0):
+            bpy.types.ASSETBROWSER_MT_asset.remove(draw_merge_actions)
+        else:
+            bpy.types.ASSETBROWSER_MT_metadata_preview_menu.remove(draw_merge_actions)
     except Exception:
         # Looks like Blender unregisters this class before the add-on?
         pass

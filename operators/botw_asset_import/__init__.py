@@ -1,6 +1,7 @@
 import bpy, os, glob
 from bpy.props import BoolProperty, StringProperty
 from math import pi
+from pathlib import Path
 
 from mathutils import Vector, Euler
 from bpy.types import Operator
@@ -30,7 +31,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     bl_label = "Import BotW .dae + .fbx"
     bl_options = {'REGISTER', 'UNDO'}
 
-    directory: StringProperty(subtype='FILE_PATH', options={'SKIP_SAVE', 'HIDDEN'})
+    directory: StringProperty(subtype='DIR_PATH', options={'SKIP_SAVE', 'HIDDEN'})
 
     rename_collections: BoolProperty(name="Rename Collections", description="Rename collections to their asset name.", default=True)
     rename_ob_mat: BoolProperty(name="Rename Objects & Materials", description="Prepend asset name to object and material names, and remove garbage strings. Useful when importing many assets into a single file to keep names unique, but can also result in exceeding the 63-character limit (those cases will not be renamed.).", default=True)
@@ -46,7 +47,9 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
     force_update_caches: BoolProperty(default=False)
 
     def invoke(self, context, _event):
-        self.directory = get_addon_prefs(context).game_models_folder
+        model_dir = get_addon_prefs(context).game_models_folder
+        if os.path.exists(model_dir):
+            self.directory = model_dir
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
@@ -71,10 +74,30 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
             self.report({'WARNING'}, "No folder selected")
             return {'CANCELLED'}
 
+        prefs = get_addon_prefs(context)
+        direct_dae_files = dae_files = glob.glob(f"{self.directory}/*.dae", recursive=False)
+        models_dir = prefs.game_models_folder
+        if direct_dae_files:
+            models_dir = Path(self.directory).parent.as_posix()
+            if not os.path.exists(prefs.game_models_folder):
+                # User didn't select the folder in user prefs, but let's assume they are at least selecting an asset dir right now.
+                prefs.game_models_folder = models_dir
+
         any_dae_files = dae_files = glob.glob(f"{self.directory}/**/*.dae", recursive=True)
         if not any_dae_files:
             self.report({'WARNING'}, "No .dae files were found anywhere in this folder or its sub-folders.")
             return {'CANCELLED'}
+
+        if any_dae_files:
+            models_dir = Path(self.directory).as_posix()
+            if not os.path.exists(prefs.game_models_folder):
+                # User didn't select the folder in user prefs, but apparently ther are in the Models dir right now.
+                prefs.game_models_folder = models_dir
+
+        if models_dir and models_dir != prefs.current_import_folder:
+            self.force_update_caches = True
+
+        prefs.current_import_folder = models_dir
 
         # Ensure dependent settings aren't enabled without their dependency.
         if not self.apply_transforms:
@@ -131,6 +154,7 @@ class OUTLINER_OT_import_botw_dae_and_fbx(Operator, ImportHelper):
         PixelImage.cache = {}
         Timer.summarize()
 
+        prefs.current_import_folder = ""
         return {'FINISHED'}
 
 def import_and_process_dae(
@@ -143,11 +167,11 @@ def import_and_process_dae(
         remove_redundant_UVs=True,
     ) -> bpy.types.Collection or None:
     dae_filename = os.path.basename(full_path)
-    dirname = os.path.basename(os.path.dirname(full_path))
+    dirpath = os.path.dirname(full_path)
+    dirname = os.path.basename(dirpath)
 
     asset_name = dae_filename.replace(".dae", "")
     asset_name = derive_asset_name(dae_filename, dirname)
-    dirname = os.path.basename(os.path.dirname(full_path))
 
     # Create the collection and set it as active so all the objects get imported there to begin with.
     noext_filename = dae_filename.replace(".dae", "")

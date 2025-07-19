@@ -3,7 +3,7 @@
 This is a Blender extension to import BotW assets in .dae & .fbx format (you kinda need both) into Blender with a lot of automated clean-up. It includes various shaders which will be assigned automatically. I made it to enable the creation of 3D fan-art, but it can be useful for previewing mod content as well.
 
 ### Preparing Game Files
-I wrote a detailed guide on how to prepare the game files for use with this add-on, which you can find [here](https://open3dlab.com/tutorials/view/241/). As you follow that guide, Step 6 will lead you back to here. If you're already familiar with modding and Switch Toolbox, then you only need that guide if you want to import mod assets.
+I wrote a detailed guide on how to prepare the game files for use with this add-on, which you can find [here](https://open3dlab.com/tutorials/view/241/). As you follow that guide, Step 6 will lead you back to here. If you're already familiar with modding and Switch Toolbox, then you don't need that guide unless if you want to import mod assets.
 
 ### Installation & file paths
 The minimum Blender version for this add-on is 4.4.

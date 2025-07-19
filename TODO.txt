@@ -1,31 +1,24 @@
-- The add-on probably doesn't work with mods right now, since we assume we can find every material in the add-on's own database, which is probably not true for mods!
-- It also can't import arbitrary mubins, since the map asset database just ships with the addon.
+Environment / mubin import
+    - Since the map asset database (mubin data) just ships with the addon, we can't import arbitrary mubin data.
+    - The fences around Woodland Stables are missing, I wonder what else, and why...?
 
-Importer feature ideas:
-    - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece. Could be fun to store and add related functionality to the BlankFile.blend scripts.
+Materials
+    - MaterialU.UserData.HideMaterialGroup probably tells the game what parts of the base Link to hide for a given armor piece. 
+        Could be fun to store and add related functionality to the BlankFile.blend scripts.
 
-- The fences around Woodland Stables are missing, I wonder what else...?
-Terrain TODO
-    - I removed the call to Recalculate Normals, but it seems needed.
+Terrain
     - There are holes in the fucking map, and I really dread the code that fills them up.
 
-Extraction tutorial:
-    - Add images or videos of the resulting imported shaders and animations
-    - Same for the ReadMe of the Git repo.
+Documentation
+    - Add images or videos of the resulting imported shaders and animations to the ReadMe
 
-Asset pack release:
-    - KEEP IN MIND I DON'T HAVE FBX'ES FROM NOESIS RN SO ALL MY ARMATURES ARE ASS.
+Asset Pack
     - Need to re-do Obj_Objects because a bunch of objects have no textures assigned for some reason.
     - Need to re-do Obj_Fauna to fix transparency and add wind.
     - Kinda need to re-do everything because the shaders are completely different now... Yikes.
+        - I don't want to do that, so I guess I'll just ship with two different resources.blend files.
 
     Make a video showing off the whole asset library with the help of the convenience scripts in BlankFile.
-        Remember to start off with factory settings or at least auto-run py scripts disabled, so I can show off the pop-up.
-        Also show off SculptableTerrain.blend, maybe as a separate video.
-            Could change the Blender image names of the terrain materials based on bmubin/linked_resources/json/terrainmat_names.json.
-                But since we already zipped and uploaded, that has to be re-done. not worth.
-
-Should update the Kena and Witcher 3 asset libraries as well, if they even need to be updated, but probably yes. 
-    For example, I don't think I marked Kena animations as assets, but might as well.
-    Could also generate new thumbnails for them maybe, although I think these libraries used Cycles, so maybe not.
-    Should definitely inlude BlankFile.blend (although maybe with a better name)
+        Start with factory settings to show off python securit popup
+        Show off SculptableTerrain.blend
+        Show off automatic rig merging and animation drag&drop

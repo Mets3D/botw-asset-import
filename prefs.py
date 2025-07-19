@@ -9,7 +9,13 @@ class BotWImportPreferences(AddonPreferences):
     game_models_folder: StringProperty(
         name="Extracted Models",
         subtype='FILE_PATH',
-        description="Path to extracted model files, containing folders of .dae/.fbx/.png",
+        description="Path to extracted model files of the main game, containing folders of .dae/.fbx/.png. If you are importing mod files, you don't need to merge your folders, nor change this. If the extracted mod files don't contain a texture, a texture from this folder will be used.",
+        default="D:\\BotW Extract\\Models\\"
+    )
+    current_import_folder: StringProperty(
+        name="Current Import's Models",
+        subtype='FILE_PATH',
+        description="Used internally, not exposed to the UI. May differ from game_models_folder when importing mod assets. This will be the primary path to search for materials and images, but we fall back to game_models_folder if a file is not found.",
         default="D:\\BotW Extract\\Models\\"
     )
     game_icons_folder: StringProperty(
@@ -79,5 +85,9 @@ def get_models_folder(context=None):
     if not os.path.exists(models_dir):
         raise FileNotFoundError("Models Folder must be specified in the add-on's preferences. Read the tooltip!")
     return models_dir
+
+def get_current_folder(context=None):
+    prefs = get_addon_prefs(context)
+    return prefs.current_import_folder
 
 registry = [BotWImportPreferences]

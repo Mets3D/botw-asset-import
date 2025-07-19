@@ -52,18 +52,7 @@ def write_more_readable_json_data(models_dir, output_dir, defaults={}):
         try:
             with open(full_path, "r", encoding="utf-8") as f:
                 data = json.load(f)  # Load JSON data
-                data = traverse_json(data, rename_far_textures_processor)
-                data = traverse_json(data, flatten_single_key_dicts_processor)
-                data = traverse_json(data, remove_redundant_name_processor)
-                data = traverse_json(data, convert_named_list_to_dict_processor)
-                data = traverse_json(data, process_renderinfo_only_processor)
-                data = traverse_json(data, replace_value_key_processor)
-                data = traverse_json(data, convert_strings_to_int_processor)
-                data = traverse_json(data, convert_semicolon_strings_to_float_list_processor)
-                data = traverse_json(data, replace_none_values_processor)
-                data = traverse_json(data, extract_value_from_single_value_dict_processor)
-                if defaults:
-                    data = remove_defaults(data, defaults)
+                data = clean_data(data, defaults)
                 save_json(data, target_file)
 
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
@@ -77,6 +66,21 @@ def write_more_readable_json_data(models_dir, output_dir, defaults={}):
     print("Missing materials:")
     for mat in missing_materials:
         print(mat)
+
+def clean_data(data, defaults={}):
+    data = traverse_json(data, rename_far_textures_processor)
+    data = traverse_json(data, flatten_single_key_dicts_processor)
+    data = traverse_json(data, remove_redundant_name_processor)
+    data = traverse_json(data, convert_named_list_to_dict_processor)
+    data = traverse_json(data, process_renderinfo_only_processor)
+    data = traverse_json(data, replace_value_key_processor)
+    data = traverse_json(data, convert_strings_to_int_processor)
+    data = traverse_json(data, convert_semicolon_strings_to_float_list_processor)
+    data = traverse_json(data, replace_none_values_processor)
+    data = traverse_json(data, extract_value_from_single_value_dict_processor)
+    if defaults:
+        data = remove_defaults(data, defaults)
+    return data
 
 def remove_defaults(data, defaults, path=""):
     """Recursively removes keys whose values match the default values."""
@@ -268,6 +272,7 @@ def load_defaults(default_file):
     with open(default_file, "r", encoding="utf-8") as file:
         return json.load(file)
 
-defaults_file = "D:\\BotW Assets\\Material Data Science\\material_defaults.json"
-defaults = load_defaults(defaults_file)
-write_more_readable_json_data(input_dir, out_dir, defaults)
+if __name__ == "__main__":
+    defaults_file = "D:\\BotW Assets\\Material Data Science\\material_defaults.json"
+    defaults = load_defaults(defaults_file)
+    write_more_readable_json_data(input_dir, out_dir, defaults)

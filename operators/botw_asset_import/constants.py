@@ -1,6 +1,7 @@
 import os, json, pickle, zipfile, io
 from multiprocessing import shared_memory
-from ...prefs import get_models_folder
+from ...prefs import get_models_folder, get_current_folder
+from ...scripts.material_json_convert import clean_data
 
 # These things are case-sensitive but it shouldn't matter.
 # TODO: Could make this extension-agnostic.
@@ -220,16 +221,24 @@ def ensure_caches(force=False, shared_mem_name="") -> dict:
         CACHE_shader_data = data['shader_data']
         return {'material_defaults':CACHE_mat_defaults, 'tex_info': CACHE_tex_info, 'image_paths': CACHE_image_paths, 'shader_data': CACHE_shader_data}
 
-    if not CACHE_mat_defaults or force:
+    if not CACHE_mat_defaults:
+        if force:
+            CACHE_mat_defaults = {}
         cache_get_mat_defaults()
 
-    if not CACHE_tex_info or force:
+    if not CACHE_tex_info:
+        if force:
+            CACHE_tex_info = {}
         cache_get_tex_info()
 
-    if not CACHE_image_paths or force:
+    if not CACHE_image_paths:
+        if force:
+            CACHE_image_paths = {}
         cache_get_img_paths()
 
-    if not CACHE_shader_data or force:
+    if not CACHE_shader_data:
+        if force:
+            CACHE_tex_info = {}
         cache_get_shader_data()
 
     return {'material_defaults':CACHE_mat_defaults, 'tex_info': CACHE_tex_info, 'image_paths': CACHE_image_paths, 'shader_data': CACHE_shader_data}
@@ -253,26 +262,38 @@ def cache_get_img_paths() -> dict[str, str]:
 
     global CACHE_image_paths
     if not CACHE_image_paths:
-        models_dir = get_models_folder()
-        for dirpath, _subfolders, files in os.walk(models_dir):
-            for file in files:
-                dirpath = os.path.join(models_dir, os.path.basename(dirpath))
-                filepath = os.path.join(dirpath, file)
+        for models_dir in (get_models_folder(), get_current_folder()):
+            for dirpath, _subfolders, files in os.walk(models_dir):
+                for file in files:
+                    filepath = os.path.join(dirpath, file)
 
-                if file.lower().endswith(TEXTURE_EXTENSION):
-                    CACHE_image_paths[file[:-len(TEXTURE_EXTENSION)]] = filepath
+                    if file.lower().endswith(TEXTURE_EXTENSION):
+                        CACHE_image_paths[file[:-len(TEXTURE_EXTENSION)]] = filepath
 
     return CACHE_image_paths
 
 def cache_get_shader_data() -> dict:
     global CACHE_shader_data
     if not CACHE_shader_data:
-        print("Ensure shader data...")
+        current_dir = get_current_folder()
+        mat_defaults = cache_get_mat_defaults()
+        for dirpath, _subfolders, files in os.walk(current_dir):
+            dir_name = os.path.basename(dirpath)
+            for file_name in files:
+                if not file_name.endswith(".json"):
+                    continue
+                json_full_path = os.path.join(dirpath, file_name)
+
+                mat_name_with_dir = ".".join([dir_name, file_name])
+                with open(json_full_path, "r", encoding="utf-8") as file:
+                    CACHE_shader_data[mat_name_with_dir] = clean_data(json.loads(file.read()), mat_defaults)
+
         with open(MATERIAL_DATA_ZIP, "rb") as f:
             zip_data = f.read()
-
         with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
             for file_name in z.namelist():
+                if file_name in CACHE_shader_data:
+                    continue
                 with z.open(file_name) as file:
                     CACHE_shader_data[file_name] = json.loads(file.read())
 

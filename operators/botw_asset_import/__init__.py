@@ -315,13 +315,13 @@ def import_whatever(context, *, import_func, filepath: str, discard_types=('EMPT
             bpy.data.objects.remove(obj)
             continue
         if obj.type == 'MESH':
-            obj['import_name'] = obj.name[:-4] if obj.name[-4]=="." and obj.name[-3:].isdigit() else obj.name
+            obj['import_name'] = obj.name[:-4] if len(obj.name) > 4 and obj.name[-4]=="." and obj.name[-3:].isdigit() else obj.name
             for mat in obj.data.materials:
                 if 'import_name' not in mat:
                     orig_name = mat.name
                     if len(orig_name) > 4 and orig_name[-4] == ".":
                         orig_name = orig_name[:-4]
-                    mat['import_name'] = mat.name[:-4] if len(mat.name)>3 and mat.name[-4]=="." and mat.name[-3:].isdigit() else mat.name
+                    mat['import_name'] = mat.name[:-4] if len(mat.name) > 4 and mat.name[-4]=="." and mat.name[-3:].isdigit() else mat.name
     return context.selected_objects[:]
 
 def cleanup_fbx_armature(context, fbx_arm):

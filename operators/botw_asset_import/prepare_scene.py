@@ -33,6 +33,9 @@ def ensure_botw_scene_settings(context):
         bloom_node.inputs['Strength'].default_value = 2.0
         links.new(previous_socket, bloom_node.inputs['Image'])
         links.new(bloom_node.outputs['Image'], output_node.inputs['Image'])
+        if bpy.app.version >= (4, 5, 0):
+            viewer = nodes['Viewer']
+            links.new(bloom_node.outputs['Image'], viewer.inputs['Image'])
 
     # Set viewport shading to the BotW MatCap.
     for area in context.screen.areas:

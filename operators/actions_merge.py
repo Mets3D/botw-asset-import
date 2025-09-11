@@ -1,8 +1,10 @@
 import bpy
-
+from bpy.types import Action
 
 class ASSET_OT_merge_actions(bpy.types.Operator):
-    """Merge two or more selected actions into the active one. In the case of conflicts, the fcurves of the active action are used, and the rest discarded."""
+    """Merge two or more selected actions into the active one.
+    In the case of conflicts, the fcurves of the active action are used, 
+    and the rest discarded."""
 
     bl_idname = "asset.merge_actions"
     bl_label = "Merge Actions"
@@ -13,11 +15,11 @@ class ASSET_OT_merge_actions(bpy.types.Operator):
         if (
             not hasattr(context, 'id') or 
             not context.id or
-            type(context.id) != bpy.types.Action
+            type(context.id) != Action
         ):
             cls.poll_message_set("No active action.")
             return False
-        sel_actions = [a for a in context.selected_ids if type(a) == bpy.types.Action]
+        sel_actions = [a for a in context.selected_ids if type(a) == Action]
         if len(sel_actions) < 2:
             cls.poll_message_set("Select more than one action.")
             return False
@@ -26,7 +28,7 @@ class ASSET_OT_merge_actions(bpy.types.Operator):
 
     def execute(self, context):
         active = context.id
-        others = [a for a in context.selected_ids if type(a) == bpy.types.Action and a != active]
+        others = [a for a in context.selected_ids if type(a) == Action and a != active]
 
         try:
             merge_actions(active, others)
@@ -38,11 +40,13 @@ class ASSET_OT_merge_actions(bpy.types.Operator):
 
         return {'FINISHED'}
 
-def merge_actions(destination: bpy.types.Action, others: list[bpy.types.Action]):
+def merge_actions(destination: Action, others: list[Action]):
     """
     Merges selected actions into a new action.
     Raises an error if multiple actions attempt to animate the same bone, except for 'Root'.
     """
+    if destination in others:
+        others.remove(destination)
     merged_fcurves = {}
 
     for action in others:
@@ -73,7 +77,7 @@ def merge_actions(destination: bpy.types.Action, others: list[bpy.types.Action])
 registry = [ASSET_OT_merge_actions]
 
 def draw_merge_actions(self, context):
-    if context.id and type(context.id) == bpy.types.Action:
+    if context.id and type(context.id) == Action:
         self.layout.operator(ASSET_OT_merge_actions.bl_idname)
 
 def register():

@@ -1,5 +1,5 @@
 import bpy
-import bpy_types
+from bpy.types import PoseBone
 from mathutils import *
 from bpy_extras.wm_utils.progress_report import ProgressReport, ProgressReportSubstep
 import os
@@ -117,7 +117,7 @@ def export_action(self, context, progress, action, filepath):
     for fc in action.fcurves:
         try:
             prop = ob.path_resolve(fc.data_path, False)  # coerce=False
-            if type(prop.data) != bpy_types.PoseBone:
+            if type(prop.data) != PoseBone:
                 raise
             pose_bone = prop.data
 
